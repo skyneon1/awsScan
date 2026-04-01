@@ -11,6 +11,9 @@ from scanner.lambda_fn import scan_lambda
 from scanner.iam import scan_iam
 from scanner.s3 import scan_s3
 from scanner.rds import scan_rds
+from scanner.security import audit_iam, audit_s3, audit_ec2, audit_rds, audit_cloudtrail
+from scanner.cost import scan_costs
+from scanner.tagging import scan_tag_compliance
 
 app = FastAPI(title="awsScan")
 templates = Jinja2Templates(directory="templates")
@@ -19,7 +22,6 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    # Use keyword argument form — compatible with Starlette 0.28+
     return templates.TemplateResponse(request=request, name="index.html")
 
 
@@ -72,19 +74,148 @@ async def scan(
         "total":    len(resources),
         "active":   len([r for r in resources if r.get("active")]),
         "inactive": len([r for r in resources if not r.get("active")]),
-        "by_service": {}
+        "by_service": {},
+        "by_region": {},
     }
     for r in resources:
         svc = r["service"]
+        reg = r.get("region", "global")
         if svc not in summary["by_service"]:
             summary["by_service"][svc] = {"active": 0, "inactive": 0}
         if r.get("active"):
             summary["by_service"][svc]["active"] += 1
         else:
             summary["by_service"][svc]["inactive"] += 1
+        # Regional breakdown
+        if reg not in ("global",):
+            summary["by_region"][reg] = summary["by_region"].get(reg, 0) + 1
 
     return JSONResponse({
         "resources": resources,
         "summary":   summary,
-        "errors":    errors
+        "errors":    errors,
     })
+
+
+@app.post("/scan/security")
+async def scan_security(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    session_token: str = Form(default=""),
+    creds_file: UploadFile = File(default=None),
+):
+    """Run security audit across all services and regions."""
+    ak, sk = access_key.strip(), secret_key.strip()
+
+    if creds_file and creds_file.filename:
+        content = await creds_file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
+        ak = profile.get("aws_access_key_id", "").strip()
+        sk = profile.get("aws_secret_access_key", "").strip()
+
+    try:
+        session = get_session(ak or None, sk or None)
+        regions = get_all_regions(session)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
+
+    findings = []
+    findings.extend(audit_iam(session))
+    findings.extend(audit_s3(session))
+
+    def audit_region(region):
+        regional = []
+        regional.extend(audit_ec2(session, region))
+        regional.extend(audit_rds(session, region))
+        regional.extend(audit_cloudtrail(session, region))
+        return regional
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(audit_region, r): r for r in regions}
+        for future in as_completed(futures):
+            try:
+                findings.extend(future.result())
+            except Exception:
+                pass
+
+    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+    findings.sort(key=lambda f: severity_order.get(f.get("severity", "INFO"), 99))
+
+    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    for f in findings:
+        sev = f.get("severity", "INFO")
+        counts[sev] = counts.get(sev, 0) + 1
+
+    return JSONResponse({
+        "findings": findings,
+        "total": len(findings),
+        "counts": counts,
+    })
+
+
+@app.post("/scan/costs")
+async def scan_costs_endpoint(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    creds_file: UploadFile = File(default=None),
+):
+    """Estimate monthly costs for running resources."""
+    ak, sk = access_key.strip(), secret_key.strip()
+
+    if creds_file and creds_file.filename:
+        content = await creds_file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
+        ak = profile.get("aws_access_key_id", "").strip()
+        sk = profile.get("aws_secret_access_key", "").strip()
+
+    try:
+        session = get_session(ak or None, sk or None)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
+
+    try:
+        data = scan_costs(session)
+        return JSONResponse(data)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/scan/tags")
+async def scan_tags_endpoint(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    creds_file: UploadFile = File(default=None),
+):
+    """Scan resources for tag compliance."""
+    ak, sk = access_key.strip(), secret_key.strip()
+
+    if creds_file and creds_file.filename:
+        content = await creds_file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
+        ak = profile.get("aws_access_key_id", "").strip()
+        sk = profile.get("aws_secret_access_key", "").strip()
+
+    try:
+        session = get_session(ak or None, sk or None)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
+
+    try:
+        records = scan_tag_compliance(session)
+        compliant = [r for r in records if r["compliant"]]
+        non_compliant = [r for r in records if not r["compliant"]]
+        return JSONResponse({
+            "records": records,
+            "total": len(records),
+            "compliant": len(compliant),
+            "non_compliant": len(non_compliant),
+            "compliance_rate": round(len(compliant) / len(records) * 100, 1) if records else 100.0,
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)

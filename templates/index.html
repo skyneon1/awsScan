@@ -4,669 +4,17 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>awsScan — AWS Resource Scanner</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg:       #0b0d14;
-      --bg2:      #13151f;
-      --bg3:      #1c1f2e;
-      --bg4:      #242840;
-      --border:   rgba(255,255,255,0.08);
-      --border2:  rgba(255,255,255,0.14);
-      --text:     #e8eaf6;
-      --muted:    #6b7299;
-      --muted2:   #9098c0;
-      --accent:   #5b7fff;
-      --accent2:  #7c9bff;
-      --green:    #22c55e;
-      --green-bg: rgba(34,197,94,0.1);
-      --red:      #ef4444;
-      --red-bg:   rgba(239,68,68,0.1);
-      --yellow:   #f59e0b;
-      --radius:   14px;
-      --radius-sm: 8px;
-    }
-
-    html, body { height: 100%; }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-
-    /* ───── BACKGROUND GLOW ───── */
-    body::before {
-      content: '';
-      position: fixed;
-      top: -200px; left: 50%;
-      transform: translateX(-50%);
-      width: 800px; height: 500px;
-      background: radial-gradient(ellipse, rgba(91,127,255,0.12) 0%, transparent 70%);
-      pointer-events: none;
-      z-index: 0;
-    }
-
-    /* ───── PAGES ───── */
-    .page { display: none; min-height: 100vh; position: relative; z-index: 1; }
-    .page.active { display: flex; }
-
-    /* ══════════════════════════════════════
-       LOGIN PAGE
-    ══════════════════════════════════════ */
-    #login-page {
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      flex-direction: column;
-    }
-
-    .login-wrap {
-      width: 100%;
-      max-width: 460px;
-    }
-
-    /* Logo */
-    .login-logo {
-      text-align: center;
-      margin-bottom: 36px;
-    }
-    .login-logo .wordmark {
-      font-size: 28px;
-      font-weight: 800;
-      letter-spacing: -1px;
-      color: var(--text);
-    }
-    .login-logo .wordmark span { color: var(--accent); }
-    .login-logo .tagline {
-      font-size: 13px;
-      color: var(--muted);
-      margin-top: 6px;
-    }
-
-    /* Card */
-    .login-card {
-      background: var(--bg2);
-      border: 1px solid var(--border2);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
-
-    .login-card-header {
-      padding: 24px 28px 0;
-    }
-    .login-card-header h2 {
-      font-size: 17px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-    .login-card-header p {
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    /* Method tabs */
-    .method-tabs {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0;
-      margin: 22px 28px 0;
-      background: var(--bg3);
-      border-radius: var(--radius-sm);
-      padding: 4px;
-    }
-    .method-tab {
-      padding: 9px 0;
-      text-align: center;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--muted);
-      cursor: pointer;
-      border-radius: 6px;
-      border: none;
-      background: transparent;
-      transition: all 0.18s;
-    }
-    .method-tab.active {
-      background: var(--bg4);
-      color: var(--text);
-      border: 1px solid var(--border2);
-    }
-
-    /* Form body */
-    .login-form-body {
-      padding: 22px 28px 28px;
-    }
-
-    .method-panel { display: none; }
-    .method-panel.active { display: block; }
-
-    /* Input group */
-    .input-group {
-      margin-bottom: 16px;
-    }
-    .input-group label {
-      display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--muted2);
-      margin-bottom: 7px;
-      letter-spacing: 0.2px;
-    }
-    .input-wrap {
-      position: relative;
-    }
-    .input-wrap input {
-      width: 100%;
-      background: var(--bg3);
-      border: 1px solid var(--border2);
-      border-radius: var(--radius-sm);
-      color: var(--text);
-      font-size: 13px;
-      font-family: 'Courier New', 'Consolas', monospace;
-      padding: 11px 42px 11px 14px;
-      outline: none;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .input-wrap input::placeholder { color: var(--muted); opacity: 0.6; }
-    .input-wrap input:focus {
-      border-color: var(--accent);
-      background: var(--bg4);
-    }
-    .input-wrap input.filled { border-color: rgba(91,127,255,0.4); }
-
-    .eye-btn {
-      position: absolute;
-      right: 12px; top: 50%;
-      transform: translateY(-50%);
-      background: none; border: none;
-      cursor: pointer;
-      color: var(--muted);
-      padding: 2px;
-      display: flex;
-      align-items: center;
-      transition: color 0.15s;
-    }
-    .eye-btn:hover { color: var(--text); }
-
-    /* Region selector */
-    .region-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    select {
-      width: 100%;
-      background: var(--bg3);
-      border: 1px solid var(--border2);
-      border-radius: var(--radius-sm);
-      color: var(--text);
-      font-size: 13px;
-      padding: 11px 14px;
-      outline: none;
-      cursor: pointer;
-      transition: border-color 0.15s;
-      appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7299' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 12px center;
-      padding-right: 32px;
-    }
-    select:focus { border-color: var(--accent); }
-
-    /* File drop */
-    .file-drop-zone {
-      border: 2px dashed var(--border2);
-      border-radius: var(--radius-sm);
-      padding: 32px 20px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.18s;
-      position: relative;
-    }
-    .file-drop-zone:hover,
-    .file-drop-zone.drag-over {
-      border-color: var(--accent);
-      background: rgba(91,127,255,0.05);
-    }
-    .file-drop-zone input[type="file"] {
-      position: absolute; inset: 0;
-      opacity: 0; cursor: pointer;
-      width: 100%; height: 100%;
-    }
-    .drop-icon {
-      width: 36px; height: 36px;
-      margin: 0 auto 12px;
-      background: var(--bg4);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .file-drop-zone h4 {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 4px;
-    }
-    .file-drop-zone p {
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .file-selected {
-      display: none;
-      align-items: center;
-      gap: 10px;
-      margin-top: 14px;
-      background: var(--green-bg);
-      border: 1px solid rgba(34,197,94,0.2);
-      border-radius: var(--radius-sm);
-      padding: 10px 14px;
-    }
-    .file-selected.show { display: flex; }
-    .file-selected span {
-      font-size: 13px;
-      color: var(--green);
-      font-weight: 500;
-    }
-
-    /* Security note */
-    .security-note {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      background: rgba(91,127,255,0.06);
-      border: 1px solid rgba(91,127,255,0.15);
-      border-radius: var(--radius-sm);
-      padding: 12px 14px;
-      margin-bottom: 20px;
-    }
-    .security-note svg { flex-shrink: 0; margin-top: 1px; }
-    .security-note p {
-      font-size: 12px;
-      color: var(--muted2);
-      line-height: 1.5;
-    }
-
-    /* Connect button */
-    .connect-btn {
-      width: 100%;
-      padding: 13px;
-      background: var(--accent);
-      color: #fff;
-      border: none;
-      border-radius: var(--radius-sm);
-      font-size: 14px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
-      letter-spacing: 0.2px;
-      position: relative;
-      overflow: hidden;
-    }
-    .connect-btn:hover { opacity: 0.88; }
-    .connect-btn:active { transform: scale(0.99); }
-    .connect-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-
-    /* Error */
-    .login-error {
-      display: none;
-      background: var(--red-bg);
-      border: 1px solid rgba(239,68,68,0.25);
-      border-radius: var(--radius-sm);
-      padding: 11px 14px;
-      font-size: 13px;
-      color: var(--red);
-      margin-bottom: 16px;
-    }
-    .login-error.show { display: block; }
-
-    /* Footer */
-    .login-footer {
-      text-align: center;
-      margin-top: 20px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-    .login-footer a {
-      color: var(--accent2);
-      text-decoration: none;
-    }
-
-    /* ══════════════════════════════════════
-       SCANNING PAGE
-    ══════════════════════════════════════ */
-    #scan-page {
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      text-align: center;
-      padding: 24px;
-    }
-
-    .scan-animation {
-      position: relative;
-      width: 100px; height: 100px;
-      margin: 0 auto 28px;
-    }
-    .scan-ring {
-      position: absolute; inset: 0;
-      border-radius: 50%;
-      border: 2px solid transparent;
-      animation: spin 1.2s linear infinite;
-    }
-    .scan-ring:nth-child(1) { border-top-color: var(--accent); }
-    .scan-ring:nth-child(2) {
-      inset: 12px;
-      border-top-color: rgba(91,127,255,0.5);
-      animation-duration: 1.8s;
-      animation-direction: reverse;
-    }
-    .scan-ring:nth-child(3) {
-      inset: 24px;
-      border-top-color: rgba(91,127,255,0.25);
-      animation-duration: 2.4s;
-    }
-    .scan-center {
-      position: absolute; inset: 36px;
-      background: var(--bg4);
-      border-radius: 50%;
-      border: 1px solid var(--border2);
-      display: flex; align-items: center; justify-content: center;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    #scan-page h2 {
-      font-size: 22px;
-      font-weight: 700;
-      margin-bottom: 10px;
-    }
-    #scan-page p {
-      font-size: 14px;
-      color: var(--muted);
-      max-width: 340px;
-      line-height: 1.6;
-    }
-
-    .scan-progress {
-      margin-top: 32px;
-      width: 100%;
-      max-width: 380px;
-    }
-    .scan-services {
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-top: 24px;
-    }
-    .svc-chip {
-      padding: 5px 14px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 500;
-      border: 1px solid var(--border2);
-      color: var(--muted);
-      background: var(--bg2);
-      transition: all 0.3s;
-    }
-    .svc-chip.scanning {
-      border-color: var(--accent);
-      color: var(--accent2);
-      background: rgba(91,127,255,0.08);
-      animation: pulse 1s ease-in-out infinite;
-    }
-    .svc-chip.done {
-      border-color: rgba(34,197,94,0.3);
-      color: var(--green);
-      background: var(--green-bg);
-      animation: none;
-    }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
-
-    /* ══════════════════════════════════════
-       DASHBOARD PAGE
-    ══════════════════════════════════════ */
-    #dashboard-page {
-      flex-direction: column;
-      min-height: 100vh;
-    }
-
-    /* Top bar */
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 14px 28px;
-      background: var(--bg2);
-      border-bottom: 1px solid var(--border);
-      position: sticky;
-      top: 0;
-      z-index: 100;
-    }
-    .topbar-logo {
-      font-size: 17px;
-      font-weight: 800;
-      letter-spacing: -0.5px;
-    }
-    .topbar-logo span { color: var(--accent); }
-
-    .topbar-meta {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .account-pill {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      background: var(--bg3);
-      border: 1px solid var(--border2);
-      border-radius: 20px;
-      padding: 5px 14px 5px 8px;
-      font-size: 12px;
-      color: var(--muted2);
-    }
-    .account-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: var(--green);
-    }
-
-    .btn-sm {
-      padding: 7px 14px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border2);
-      background: var(--bg3);
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
-
-    /* Dashboard body */
-    .dash-body {
-      max-width: 1200px;
-      margin: 0 auto;
-      padding: 32px 24px;
-      width: 100%;
-    }
-
-    .dash-heading {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-    }
-    .dash-heading h1 {
-      font-size: 22px;
-      font-weight: 700;
-    }
-    .dash-heading p { font-size: 13px; color: var(--muted); margin-top: 2px; }
-
-    /* Summary grid */
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 14px;
-      margin-bottom: 28px;
-    }
-    .stat-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 20px;
-    }
-    .stat-card .stat-label {
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--muted);
-      margin-bottom: 10px;
-    }
-    .stat-card .stat-val {
-      font-size: 30px;
-      font-weight: 700;
-      line-height: 1;
-    }
-    .stat-card.c-blue .stat-val  { color: var(--accent2); }
-    .stat-card.c-green .stat-val { color: var(--green); }
-    .stat-card.c-red .stat-val   { color: var(--red); }
-    .stat-card.c-gray .stat-val  { color: var(--muted2); }
-
-    /* Filters bar */
-    .filters-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-bottom: 16px;
-    }
-    .pill-btn {
-      padding: 5px 14px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 500;
-      border: 1px solid var(--border2);
-      color: var(--muted2);
-      background: transparent;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .pill-btn:hover { border-color: var(--accent); color: var(--accent2); }
-    .pill-btn.active {
-      background: rgba(91,127,255,0.12);
-      border-color: var(--accent);
-      color: var(--accent2);
-    }
-    .search-input {
-      margin-left: auto;
-      background: var(--bg2);
-      border: 1px solid var(--border2);
-      border-radius: var(--radius-sm);
-      color: var(--text);
-      font-size: 13px;
-      padding: 7px 14px;
-      outline: none;
-      width: 220px;
-      transition: border-color 0.15s;
-    }
-    .search-input:focus { border-color: var(--accent); }
-
-    /* Table */
-    .table-card {
-      background: var(--bg2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      overflow: hidden;
-    }
-    table { width: 100%; border-collapse: collapse; }
-    thead tr { background: var(--bg3); }
-    th {
-      text-align: left;
-      padding: 12px 16px;
-      font-size: 11px;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.8px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-    }
-    td {
-      padding: 12px 16px;
-      font-size: 13px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-    tbody tr:last-child td { border-bottom: none; }
-    tbody tr:hover { background: rgba(255,255,255,0.02); }
-
-    .svc-badge {
-      display: inline-block;
-      padding: 3px 9px;
-      border-radius: 6px;
-      font-size: 11px;
-      font-weight: 600;
-    }
-    .svc-EC2    { background: rgba(59,130,246,0.15); color: #7eb3ff; }
-    .svc-Lambda { background: rgba(168,85,247,0.15); color: #c084fc; }
-    .svc-IAM    { background: rgba(20,184,166,0.15); color: #6ee7b7; }
-    .svc-S3     { background: rgba(245,158,11,0.15); color: #fbbf24; }
-    .svc-RDS    { background: rgba(6,182,212,0.15);  color: #67e8f9; }
-
-    .status-dot {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 500;
-    }
-    .status-dot::before {
-      content: '';
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .status-dot.active  { color: var(--green); }
-    .status-dot.active::before  { background: var(--green); box-shadow: 0 0 6px var(--green); }
-    .status-dot.inactive { color: var(--red); }
-    .status-dot.inactive::before { background: var(--red); }
-
-    .mono { font-family: 'Courier New', monospace; font-size: 12px; color: var(--muted2); }
-
-    .empty-state {
-      text-align: center;
-      padding: 48px;
-      color: var(--muted);
-      font-size: 14px;
-    }
-    .empty-state p { margin-top: 8px; font-size: 13px; }
-
-    /* Export bar */
-    .export-bar {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 16px;
-    }
-  </style>
+  <meta name="description" content="Scan your AWS account for resources, security findings, cost estimates and tag compliance."/>
+  <link rel="stylesheet" href="/static/app.css"/>
 </head>
 <body>
 
-<!-- ══════════════════════════════════════
-     PAGE 1: LOGIN
-══════════════════════════════════════ -->
+<!-- ══ PAGE 1: LOGIN ══ -->
 <div class="page active" id="login-page">
   <div class="login-wrap">
-
     <div class="login-logo">
       <div class="wordmark">aws<span>Scan</span></div>
-      <div class="tagline">AWS Resource Scanner — see everything in your account</div>
+      <div class="tagline">AWS Resource Scanner — inventory, security &amp; costs</div>
     </div>
 
     <div class="login-card">
@@ -676,8 +24,8 @@
       </div>
 
       <div class="method-tabs">
-        <button class="method-tab active" onclick="switchMethod('keys', this)">Access Keys</button>
-        <button class="method-tab" onclick="switchMethod('file', this)">Credentials File</button>
+        <button class="method-tab active" onclick="switchMethod('keys',this)">Access Keys</button>
+        <button class="method-tab" onclick="switchMethod('file',this)">Credentials File</button>
       </div>
 
       <div class="login-form-body">
@@ -690,18 +38,17 @@
             <div class="input-wrap">
               <input type="text" id="access_key" placeholder="AKIAIOSFODNN7EXAMPLE"
                 autocomplete="off" spellcheck="false"
-                oninput="this.classList.toggle('filled', this.value.length > 0)"/>
+                oninput="this.classList.toggle('filled',this.value.length>0)"/>
             </div>
           </div>
-
           <div class="input-group">
             <label>AWS Secret Access Key</label>
             <div class="input-wrap">
-              <input type="password" id="secret_key" placeholder="wJalrXUtnFEMI/K7MDENG..."
+              <input type="password" id="secret_key" placeholder="wJalrXUtnFEMI/K7MDENG…"
                 autocomplete="off" spellcheck="false"
-                oninput="this.classList.toggle('filled', this.value.length > 0)"/>
+                oninput="this.classList.toggle('filled',this.value.length>0)"/>
               <button class="eye-btn" type="button" onclick="toggleSecret(this)" tabindex="-1">
-                <svg id="eye-icon" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                   <path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
                 </svg>
@@ -730,12 +77,11 @@
           </div>
         </div>
 
-        <!-- Security note -->
-        <div class="security-note" style="margin-top:20px">
-          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#5b7fff" stroke-width="2" style="margin-top:1px;flex-shrink:0">
+        <div class="security-note" style="margin-top:18px">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="#5b7fff" stroke-width="2" style="flex-shrink:0;margin-top:1px">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
           </svg>
-          <p>Your credentials are used only to call the AWS API and are <strong style="color:var(--text)">never stored or logged</strong> anywhere on this server.</p>
+          <p>Credentials are used only to call the AWS API and are <strong style="color:var(--text)">never stored or logged</strong>. All calls are read-only.</p>
         </div>
 
         <button class="connect-btn" id="connect-btn" onclick="startConnect()">
@@ -744,17 +90,12 @@
       </div>
     </div>
 
-    <div class="login-footer">
-      Reads-only AWS API calls &mdash; no changes made to your account
-    </div>
-
+    <div class="login-footer">Read-only AWS API calls &mdash; no changes made to your account</div>
   </div>
 </div>
 
 
-<!-- ══════════════════════════════════════
-     PAGE 2: SCANNING ANIMATION
-══════════════════════════════════════ -->
+<!-- ══ PAGE 2: SCANNING ══ -->
 <div class="page" id="scan-page">
   <div class="scan-animation">
     <div class="scan-ring"></div>
@@ -766,10 +107,8 @@
       </svg>
     </div>
   </div>
-
   <h2>Scanning your AWS account</h2>
   <p>Checking all regions for active and inactive resources. This usually takes 15–30 seconds.</p>
-
   <div class="scan-services">
     <div class="svc-chip" id="chip-EC2">EC2</div>
     <div class="svc-chip" id="chip-Lambda">Lambda</div>
@@ -777,17 +116,17 @@
     <div class="svc-chip" id="chip-S3">S3</div>
     <div class="svc-chip" id="chip-RDS">RDS</div>
   </div>
+  <div class="scan-step" id="scan-step">Initialising…</div>
 </div>
 
 
-<!-- ══════════════════════════════════════
-     PAGE 3: DASHBOARD
-══════════════════════════════════════ -->
+<!-- ══ PAGE 3: DASHBOARD ══ -->
 <div class="page" id="dashboard-page">
 
+  <!-- Topbar -->
   <div class="topbar">
     <div class="topbar-logo">aws<span>Scan</span></div>
-    <div class="topbar-meta">
+    <div class="topbar-right">
       <div class="account-pill">
         <div class="account-dot"></div>
         <span id="account-label">Connected</span>
@@ -796,310 +135,150 @@
     </div>
   </div>
 
-  <div class="dash-body">
-    <div class="dash-heading">
-      <div>
-        <h1>Resource overview</h1>
-        <p id="scan-timestamp">Scanned just now</p>
+  <!-- Nav tabs -->
+  <div class="dash-nav">
+    <button class="dash-tab" data-tab="resources" onclick="showDashTab('resources')">
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Resources
+      <span class="tab-badge" id="res-badge">0</span>
+    </button>
+    <button class="dash-tab" data-tab="security" onclick="showDashTab('security');loadSecurity()">
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      Security
+      <span class="tab-badge" id="sec-badge">—</span>
+    </button>
+    <button class="dash-tab" data-tab="costs" onclick="showDashTab('costs');loadCosts()">
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Cost Estimate
+      <span class="tab-badge" id="cost-badge">—</span>
+    </button>
+    <button class="dash-tab" data-tab="tags" onclick="showDashTab('tags');loadTags()">
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+      Tag Compliance
+      <span class="tab-badge" id="tag-badge">—</span>
+    </button>
+  </div>
+
+  <!-- ── Resources Tab ── -->
+  <div class="tab-panel active" id="tab-resources">
+    <div class="dash-body">
+      <div class="section-header">
+        <div>
+          <h1>Resource overview</h1>
+          <p id="scan-timestamp">Scanned just now</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn-sm" onclick="exportJSON()">Export JSON</button>
+          <button class="btn-sm" onclick="exportCSV()">Export CSV</button>
+        </div>
       </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn-sm" onclick="exportJSON()">Export JSON</button>
-        <button class="btn-sm" onclick="exportCSV()">Export CSV</button>
+
+      <div class="summary-grid" id="summary-grid"></div>
+
+      <div class="charts-row">
+        <div class="chart-card">
+          <h3>Service Breakdown</h3>
+          <div id="donut-service"></div>
+        </div>
+        <div class="chart-card">
+          <h3>Top Regions by Resource Count</h3>
+          <div class="bar-list" id="region-bars"></div>
+        </div>
       </div>
-    </div>
 
-    <!-- Summary cards -->
-    <div class="summary-grid" id="summary-grid"></div>
+      <div class="filters-bar">
+        <button class="pill-btn active" onclick="setFilter('all',this)">All</button>
+        <button class="pill-btn" onclick="setFilter('active',this)">Active</button>
+        <button class="pill-btn" onclick="setFilter('inactive',this)">Inactive</button>
+        <button class="pill-btn" onclick="setFilter('EC2',this)">EC2</button>
+        <button class="pill-btn" onclick="setFilter('Lambda',this)">Lambda</button>
+        <button class="pill-btn" onclick="setFilter('IAM',this)">IAM</button>
+        <button class="pill-btn" onclick="setFilter('S3',this)">S3</button>
+        <button class="pill-btn" onclick="setFilter('RDS',this)">RDS</button>
+        <input class="search-input" type="text" placeholder="Search name or ID…" oninput="setSearch(this.value)"/>
+      </div>
 
-    <!-- Filters -->
-    <div class="filters-bar">
-      <button class="pill-btn active" onclick="setFilter('all',this)">All</button>
-      <button class="pill-btn" onclick="setFilter('active',this)">Active</button>
-      <button class="pill-btn" onclick="setFilter('inactive',this)">Inactive</button>
-      <button class="pill-btn" onclick="setFilter('EC2',this)">EC2</button>
-      <button class="pill-btn" onclick="setFilter('Lambda',this)">Lambda</button>
-      <button class="pill-btn" onclick="setFilter('IAM',this)">IAM</button>
-      <button class="pill-btn" onclick="setFilter('S3',this)">S3</button>
-      <button class="pill-btn" onclick="setFilter('RDS',this)">RDS</button>
-      <input class="search-input" type="text" placeholder="Search name or ID..."
-        oninput="setSearch(this.value)"/>
-    </div>
-
-    <!-- Table -->
-    <div class="table-card">
-      <table>
-        <thead>
-          <tr>
-            <th>Service</th>
-            <th>Name / ID</th>
-            <th>Type</th>
-            <th>Region</th>
-            <th>State</th>
-            <th>Status</th>
-            <th>Launched</th>
-          </tr>
-        </thead>
-        <tbody id="resource-tbody"></tbody>
-      </table>
-      <div class="empty-state" id="empty-state" style="display:none">
-        <strong>No resources found</strong>
-        <p>Try changing your filter or search query.</p>
+      <div class="table-card">
+        <table>
+          <thead><tr>
+            <th>Service</th><th>Name / ID</th><th>Type</th>
+            <th>Region</th><th>State</th><th>Status</th><th>Launched</th>
+          </tr></thead>
+          <tbody id="resource-tbody"></tbody>
+        </table>
+        <div class="empty-state" id="empty-state" style="display:none">
+          <strong>No resources found</strong>
+          <p>Try changing your filter or search query.</p>
+        </div>
       </div>
     </div>
   </div>
-</div>
 
-
-<script>
-  // ── State ──
-  let allResources = [];
-  let activeFilter = 'all';
-  let searchQuery  = '';
-  let activeMethod = 'keys';
-  let uploadedFile = null;
-
-  // ── Tab switch ──
-  function switchMethod(method, btn) {
-    activeMethod = method;
-    document.querySelectorAll('.method-tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.method-panel').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('panel-' + method).classList.add('active');
-  }
-
-  // ── Show/hide secret ──
-  function toggleSecret(btn) {
-    const input = btn.previousElementSibling;
-    const isText = input.type === 'text';
-    input.type = isText ? 'password' : 'text';
-    btn.querySelector('svg').style.opacity = isText ? '1' : '0.5';
-  }
-
-  // ── File upload ──
-  function handleFile(input) {
-    uploadedFile = input.files[0];
-    if (uploadedFile) {
-      document.getElementById('file-name-label').textContent = uploadedFile.name;
-      document.getElementById('file-selected').classList.add('show');
-    }
-  }
-
-  // ── Page switcher ──
-  function showPage(id) {
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-  }
-
-  function goBack() {
-    allResources = [];
-    uploadedFile = null;
-    document.getElementById('access_key').value = '';
-    document.getElementById('secret_key').value = '';
-    document.getElementById('file-selected').classList.remove('show');
-    showPage('login-page');
-  }
-
-  // ── Scanning chips animation ──
-  function animateChips() {
-    const chips = ['EC2','Lambda','IAM','S3','RDS'];
-    chips.forEach(c => {
-      document.getElementById('chip-'+c).className = 'svc-chip';
-    });
-    let i = 0;
-    const interval = setInterval(() => {
-      if (i > 0) document.getElementById('chip-'+chips[i-1]).className = 'svc-chip done';
-      if (i < chips.length) {
-        document.getElementById('chip-'+chips[i]).className = 'svc-chip scanning';
-        i++;
-      } else {
-        clearInterval(interval);
-      }
-    }, 900);
-  }
-
-  // ── Main connect + scan ──
-  async function startConnect() {
-    const errBox = document.getElementById('login-error');
-    errBox.classList.remove('show');
-
-    const ak = document.getElementById('access_key').value.trim();
-    const sk = document.getElementById('secret_key').value.trim();
-
-    if (activeMethod === 'keys' && (!ak || !sk)) {
-      errBox.textContent = 'Please enter both Access Key ID and Secret Access Key.';
-      errBox.classList.add('show');
-      return;
-    }
-    if (activeMethod === 'file' && !uploadedFile) {
-      errBox.textContent = 'Please upload your AWS credentials file.';
-      errBox.classList.add('show');
-      return;
-    }
-
-    document.getElementById('connect-btn').disabled = true;
-    showPage('scan-page');
-    animateChips();
-
-    const formData = new FormData();
-    if (activeMethod === 'keys') {
-      formData.append('access_key', ak);
-      formData.append('secret_key', sk);
-    } else {
-      formData.append('creds_file', uploadedFile);
-    }
-
-    try {
-      const res  = await fetch('/scan', { method: 'POST', body: formData });
-      const data = await res.json();
-
-      if (data.error) {
-        showPage('login-page');
-        errBox.textContent = 'AWS error: ' + data.error;
-        errBox.classList.add('show');
-        document.getElementById('connect-btn').disabled = false;
-        return;
-      }
-
-      allResources = data.resources || [];
-      buildDashboard(data.summary);
-      renderTable();
-
-      // Mark all chips done
-      ['EC2','Lambda','IAM','S3','RDS'].forEach(c => {
-        document.getElementById('chip-'+c).className = 'svc-chip done';
-      });
-
-      setTimeout(() => {
-        showPage('dashboard-page');
-        document.getElementById('connect-btn').disabled = false;
-      }, 600);
-
-    } catch (err) {
-      showPage('login-page');
-      errBox.textContent = 'Network error: ' + err.message;
-      errBox.classList.add('show');
-      document.getElementById('connect-btn').disabled = false;
-    }
-  }
-
-  // ── Build dashboard summary ──
-  function buildDashboard(summary) {
-    // Account label
-    const ak = document.getElementById('access_key').value.trim();
-    document.getElementById('account-label').textContent =
-      ak ? ak.slice(0,8) + '••••' : 'Connected';
-
-    // Timestamp
-    document.getElementById('scan-timestamp').textContent =
-      'Scanned at ' + new Date().toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit' });
-
-    // Summary cards
-    const grid = document.getElementById('summary-grid');
-    let html = `
-      <div class="stat-card c-blue">
-        <div class="stat-label">Total Resources</div>
-        <div class="stat-val">${summary.total}</div>
-      </div>
-      <div class="stat-card c-green">
-        <div class="stat-label">Active</div>
-        <div class="stat-val">${summary.active}</div>
-      </div>
-      <div class="stat-card c-red">
-        <div class="stat-label">Inactive</div>
-        <div class="stat-val">${summary.inactive}</div>
-      </div>
-    `;
-    for (const [svc, counts] of Object.entries(summary.by_service || {})) {
-      html += `
-        <div class="stat-card c-gray">
-          <div class="stat-label">${svc}</div>
-          <div class="stat-val">${counts.active + counts.inactive}</div>
+  <!-- ── Security Tab ── -->
+  <div class="tab-panel" id="tab-security">
+    <div class="dash-body">
+      <div class="section-header" style="margin-bottom:20px">
+        <div>
+          <h2>Security Findings</h2>
+          <p>IAM, S3, EC2, RDS &amp; CloudTrail misconfigurations</p>
         </div>
-      `;
-    }
-    grid.innerHTML = html;
-  }
+        <button class="btn-sm" onclick="exportSecurityJSON()">Export JSON</button>
+      </div>
+      <div id="sec-content">
+        <div class="empty-state">
+          <strong>Security audit not loaded</strong>
+          <p>Click the Security tab to run the audit.</p>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  // ── Filters ──
-  function setFilter(f, btn) {
-    activeFilter = f;
-    document.querySelectorAll('.pill-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    renderTable();
-  }
+  <!-- ── Cost Tab ── -->
+  <div class="tab-panel" id="tab-costs">
+    <div class="dash-body">
+      <div class="section-header" style="margin-bottom:20px">
+        <div>
+          <h2>Cost Estimation</h2>
+          <p>Estimated monthly spend based on on-demand pricing</p>
+        </div>
+      </div>
+      <div id="cost-content">
+        <div class="empty-state">
+          <strong>Cost data not loaded</strong>
+          <p>Click the Cost Estimate tab to calculate.</p>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  function setSearch(q) {
-    searchQuery = q.toLowerCase();
-    renderTable();
-  }
+  <!-- ── Tags Tab ── -->
+  <div class="tab-panel" id="tab-tags">
+    <div class="dash-body">
+      <div class="section-header" style="margin-bottom:20px">
+        <div>
+          <h2>Tag Compliance</h2>
+          <p>Check which resources are missing required tags</p>
+        </div>
+      </div>
+      <div id="tag-content">
+        <div class="empty-state">
+          <strong>Tag data not loaded</strong>
+          <p>Click the Tag Compliance tab to check.</p>
+        </div>
+      </div>
+    </div>
+  </div>
 
-  // ── Render table ──
-  function renderTable() {
-    let rows = allResources;
+</div><!-- /dashboard-page -->
 
-    if (activeFilter === 'active')   rows = rows.filter(r => r.active);
-    if (activeFilter === 'inactive') rows = rows.filter(r => !r.active);
-    if (['EC2','Lambda','IAM','S3','RDS'].includes(activeFilter))
-      rows = rows.filter(r => r.service === activeFilter);
-
-    if (searchQuery)
-      rows = rows.filter(r =>
-        r.name?.toLowerCase().includes(searchQuery) ||
-        r.id?.toLowerCase().includes(searchQuery)
-      );
-
-    const tbody = document.getElementById('resource-tbody');
-    const empty = document.getElementById('empty-state');
-
-    if (rows.length === 0) {
-      tbody.innerHTML = '';
-      empty.style.display = 'block';
-      return;
-    }
-    empty.style.display = 'none';
-
-    tbody.innerHTML = rows.map(r => `
-      <tr>
-        <td><span class="svc-badge svc-${r.service}">${r.service}</span></td>
-        <td class="mono">${r.name}</td>
-        <td style="color:var(--muted2);font-size:12px">${r.type}</td>
-        <td style="color:var(--muted2);font-size:12px">${r.region}</td>
-        <td style="color:var(--muted2);font-size:12px">${r.state}</td>
-        <td><span class="status-dot ${r.active ? 'active' : 'inactive'}">${r.active ? 'Active' : 'Inactive'}</span></td>
-        <td style="color:var(--muted);font-size:12px">${fmtDate(r.launched)}</td>
-      </tr>
-    `).join('');
-  }
-
-  function fmtDate(d) {
-    if (!d || d === 'N/A') return '—';
-    try {
-      return new Date(d).toLocaleDateString('en-IN', {
-        day: '2-digit', month: 'short', year: 'numeric'
-      });
-    } catch { return d; }
-  }
-
-  // ── Exports ──
-  function exportJSON() {
-    const blob = new Blob([JSON.stringify(allResources, null, 2)], { type: 'application/json' });
-    dl(blob, 'awsScan-results.json');
-  }
-
-  function exportCSV() {
-    const cols = ['service','name','id','type','state','active','region','launched'];
-    const lines = [cols.join(','), ...allResources.map(r =>
-      cols.map(c => `"${r[c] ?? ''}"`).join(',')
-    )];
-    dl(new Blob([lines.join('\n')], { type: 'text/csv' }), 'awsScan-results.csv');
-  }
-
-  function dl(blob, name) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-  }
+<script src="/static/app.js"></script>
+<script>
+  // Wire up the resources tab badge after scan completes
+  const _origBuild = buildDashboard;
+  buildDashboard = function(summary) {
+    _origBuild(summary);
+    document.getElementById('res-badge').textContent = summary.total;
+  };
 </script>
 </body>
 </html>
