@@ -37,7 +37,7 @@
 #### Option 1: Local Development
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/awsScan.git
+git clone https://github.com/skyneon1/awsScan.git
 cd awsScan
 
 # Install dependencies
@@ -64,7 +64,7 @@ docker run -p 8000:8000 awsscan
 ---
 
 ### 🤝 Contributing
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/yourusername/awsScan/issues).
+Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](https://github.com/skyneon1/awsScan/issues).
 
 ### 🖋️ License
 Distributed under the MIT License. See `LICENSE` for more information.
