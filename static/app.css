@@ -184,6 +184,8 @@ tbody tr:hover{background:rgba(255,255,255,.02)}
 .svc-VPC{background:rgba(74,222,128,.15);color:var(--green)}
 .svc-DynamoDB{background:rgba(59,130,246,.15);color:var(--accent)}
 .svc-CloudFront{background:rgba(236,72,153,.15);color:#f472b6}
+.svc-EBS{background:rgba(14,165,233,.15);color:#0ea5e9}
+.badge-public{background:var(--red-bg);color:var(--red);font-size:9px;font-weight:800;padding:1px 4px;border-radius:4px;text-transform:uppercase;margin-left:6px;border:1px solid rgba(239,68,68,0.2);vertical-align:middle}
 
 body.light-mode .svc-IAM{color:#0d9488}
 body.light-mode .svc-RDS{color:#0891b2}

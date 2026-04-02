@@ -11,6 +11,7 @@ from scanner.lambda_fn import scan_lambda
 from scanner.iam import scan_iam, scan_iam_detailed
 from scanner.s3 import scan_s3
 from scanner.rds import scan_rds
+from scanner.ebs import scan_ebs
 from scanner.vpc import scan_vpc
 from scanner.dynamodb import scan_dynamodb
 from scanner.cloudfront import scan_cloudfront
@@ -61,6 +62,7 @@ def scan(
         regional.extend(scan_ec2(session, region))
         regional.extend(scan_lambda(session, region))
         regional.extend(scan_rds(session, region))
+        regional.extend(scan_ebs(session, region))
         regional.extend(scan_vpc(session, region))
         regional.extend(scan_dynamodb(session, region))
         return regional
@@ -396,3 +398,73 @@ def get_resource_status(
         if "NotFound" in error_msg:
             return JSONResponse({"state": "terminated" if service=="ec2" else "deleted", "active": False})
         return JSONResponse({"error": error_msg}, status_code=500)
+
+
+@app.post("/export")
+def export_inventory(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    creds_file: UploadFile = File(default=None),
+):
+    """Scan and return a downloadable CSV of current resources."""
+    ak, sk = access_key.strip(), secret_key.strip()
+    if creds_file and creds_file.filename:
+        # Re-read for consistency if needed, though creds_file.file is already at end after scan
+        creds_file.file.seek(0)
+        content = creds_file.file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
+        ak = profile.get("aws_access_key_id", "").strip()
+        sk = profile.get("aws_secret_access_key", "").strip()
+
+    try:
+        session = get_session(ak or None, sk or None)
+        import io, csv
+        from fastapi.responses import StreamingResponse
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        results = []
+        results.extend(scan_iam(session))
+        results.extend(scan_s3(session))
+        results.extend(scan_cloudfront(session))
+        
+        regions = session.client("ec2").describe_regions()["Regions"]
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            futures = []
+            for r in regions:
+                reg = r["RegionName"]
+                futures.append(executor.submit(scan_ec2, session, reg))
+                futures.append(executor.submit(scan_lambda, session, reg))
+                futures.append(executor.submit(scan_rds, session, reg))
+                futures.append(executor.submit(scan_ebs, session, reg))
+                futures.append(executor.submit(scan_vpc, session, reg))
+                futures.append(executor.submit(scan_dynamodb, session, reg))
+            for f in as_completed(futures):
+                results.extend(f.result())
+        
+        clean = [r for r in results if r and "error" not in r]
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=["service", "name", "id", "type", "region", "state", "active", "launched", "extra"])
+        writer.writeheader()
+        for r in clean:
+            extra_str = "; ".join([f"{k}:{v}" for k,v in r.get("extra", {}).items()])
+            writer.writerow({
+                "service": r["service"],
+                "name": r["name"],
+                "id": r["id"],
+                "type": r["type"],
+                "region": r["region"],
+                "state": r["state"],
+                "active": r["active"],
+                "launched": r["launched"],
+                "extra": extra_str
+            })
+        output.seek(0)
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=aws_inventory.csv"}
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)

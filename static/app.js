@@ -178,7 +178,7 @@ function buildDashboard(summary) {
   `;
   const svcColors = {
     'EC2': 'c-blue', 'RDS': 'c-cyan', 'Lambda': 'c-purple', 'S3': 'c-yellow',
-    'IAM': 'c-teal', 'VPC': 'c-green', 'DynamoDB': 'c-blue', 'CloudFront': 'c-pink'
+    'IAM': 'c-teal', 'VPC': 'c-green', 'DynamoDB': 'c-blue', 'CloudFront': 'c-pink', 'EBS': 'c-cyan'
   };
   for (const [svc, c] of Object.entries(byService)) {
     const cls = svcColors[svc] || 'c-gray';
@@ -274,7 +274,10 @@ function renderTable() {
   tbody.innerHTML = rows.map(r => `
     <tr>
       <td><span class="svc-badge svc-${r.service}">${r.service}</span></td>
-      <td class="mono">${r.name}</td>
+      <td class="mono">
+        ${r.name}
+        ${r.extra && r.extra['Public IP'] && r.extra['Public IP'] !== 'None' ? '<span class="badge-public">Public</span>' : ''}
+      </td>
       <td style="color:var(--muted2);font-size:12px">${r.type}</td>
       <td style="color:var(--muted2);font-size:12px">${r.region}</td>
       <td style="color:var(--muted2);font-size:12px">${r.state}</td>
@@ -811,7 +814,7 @@ function startDemo() {
   setTimeout(() => {
     buildDashboard(summary);
     renderTable();
-    ['EC2','Lambda','IAM','S3','RDS','VPC','DynamoDB','CloudFront'].forEach(c => { 
+    ['EC2','Lambda','IAM','S3','RDS','VPC','DynamoDB','CloudFront','EBS'].forEach(c => { 
       const el = document.getElementById('chip-' + c);
       if(el) el.className = 'svc-chip done'; 
     });
@@ -828,4 +831,22 @@ function startDemo() {
       renderUsers();
     }, 500);
   }, 1200);
+}
+
+async function exportCSV() {
+  const fd = getFormData();
+  try {
+    const res = await fetch('/export', { method: 'POST', body: fd });
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'aws_inventory.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch(e) {
+    alert('Export error: ' + e.message);
+  }
 }
