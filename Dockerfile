@@ -22,6 +22,5 @@ COPY . .
 # Expose the communication port
 EXPOSE 8000
 
-# Start the application using Gunicorn for production-grade serving
-# We use the PORT environment variable if provided (common on Render/Railway)
-CMD gunicorn -w 4 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:${PORT:-8000}
+# Start the application using a single worker (better for Free Tier RAM limits)
+CMD gunicorn -w 1 -k uvicorn.workers.UvicornWorker main:app --bind 0.0.0.0:${PORT:-8000} --timeout 120

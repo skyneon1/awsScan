@@ -25,6 +25,11 @@ app = FastAPI(title="awsScan")
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+@app.on_event("startup")
+async def startup_event():
+    print("🚀 [SERVER] awsScan Dashboard is booting up...")
+    print("🌍 [READY] Point your browser to the Render/Railway URL.")
+
 
 # ── Helper: parse credentials from form or uploaded file ────────────────────
 def _parse_creds(access_key: str, secret_key: str, creds_file: UploadFile):
