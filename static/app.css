@@ -19,11 +19,11 @@ body.light-mode {
   --yellow-bg:rgba(245,158,11,0.1); --purple-bg:rgba(168,85,247,0.1);
 }
 html,body{height:100%}
-body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;min-height:100vh;overflow-x:hidden}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;min-height:100vh;display:flex;flex-direction:column;overflow-x:hidden}
 body::before{content:'';position:fixed;top:-200px;left:50%;transform:translateX(-50%);width:800px;height:500px;background:radial-gradient(ellipse,rgba(91,127,255,0.12) 0%,transparent 70%);pointer-events:none;z-index:0}
 
 /* ── Pages ── */
-.page{display:none;min-height:100vh;position:relative;z-index:1}
+.page{display:none;flex:1;position:relative;z-index:1}
 .page.active{display:flex}
 
 /* ══ LOGIN ══ */
@@ -90,7 +90,7 @@ body::before{content:'';position:fixed;top:-200px;left:50%;transform:translateX(
 .scan-step{font-size:13px;color:var(--muted2);margin-top:16px}
 
 /* ══ DASHBOARD ══ */
-#dashboard-page{flex-direction:column;min-height:100vh}
+#dashboard-page{flex-direction:column}
 .topbar{display:flex;align-items:center;justify-content:space-between;padding:13px 28px;background:var(--bg2);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
 .topbar-logo{font-size:17px;font-weight:800;letter-spacing:-.5px}
 .topbar-logo span{color:var(--accent)}
@@ -359,8 +359,9 @@ body.light-mode .settings-collapse{background:rgba(0,0,0,0.01)}
 }
 
 /* ── Footer ── */
-.dash-footer{padding:40px 24px 24px; border-top:1px solid var(--border); margin-top:auto; background:var(--bg); z-index:10; flex-shrink:0;}
+.dash-footer{padding:40px 24px 24px; border-top:1px solid var(--border); margin-top:auto; background:var(--bg); z-index:10; flex-shrink:0; width:100%}
 .footer-content{max-width:1440px; margin:0 auto; display:flex; justify-content:space-between; align-items:center; color:var(--muted); font-size:12px; opacity:0.8}
 .footer-link{display:flex; align-items:center; gap:8px; color:var(--muted2); text-decoration:none; transition:all .2s; font-weight:500; padding:6px 12px; border-radius:6px; background:var(--bg2); border:1px solid var(--border)}
 .footer-link:hover{color:var(--accent); border-color:var(--accent); background:var(--bg3); transform:translateY(-1px)}
 .footer-link svg { opacity:0.8 }
+
