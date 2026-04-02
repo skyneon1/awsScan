@@ -1,20 +1,9 @@
-"""
-Tag compliance scanner — checks all resources for missing required tags.
-"""
-
-REQUIRED_TAGS = ["Name", "Environment", "Owner", "Project"]
-
 def _check_tags(tags: list, required: list) -> list:
-    """Return a list of missing tag keys."""
     existing = {t["Key"] for t in (tags or [])}
     return [k for k in required if k not in existing]
 
-
-def scan_tag_compliance(session) -> list[dict]:
-    """
-    Scans EC2, RDS, Lambda for missing required tags.
-    Returns list of compliance records.
-    """
+def scan_tag_compliance(session, required_tags: list = None) -> list[dict]:
+    required = required_tags or ["Name", "Environment", "Owner", "Project"]
     records = []
 
     try:
@@ -31,7 +20,7 @@ def scan_tag_compliance(session) -> list[dict]:
             for res in ec2.describe_instances()["Reservations"]:
                 for inst in res["Instances"]:
                     tags = inst.get("Tags", [])
-                    missing = _check_tags(tags, REQUIRED_TAGS)
+                    missing = _check_tags(tags, required)
                     name = next((t["Value"] for t in tags if t["Key"] == "Name"), inst["InstanceId"])
                     records.append({
                         "service": "EC2",
@@ -54,7 +43,7 @@ def scan_tag_compliance(session) -> list[dict]:
                     raw_tags = [{"Key": k, "Value": v} for k, v in tag_resp.get("Tags", {}).items()]
                 except Exception:
                     raw_tags = []
-                missing = _check_tags(raw_tags, REQUIRED_TAGS)
+                missing = _check_tags(raw_tags, required)
                 records.append({
                     "service": "Lambda",
                     "id": fn["FunctionArn"],
@@ -76,7 +65,7 @@ def scan_tag_compliance(session) -> list[dict]:
                     raw_tags = tag_resp.get("TagList", [])
                 except Exception:
                     raw_tags = []
-                missing = _check_tags(raw_tags, REQUIRED_TAGS)
+                missing = _check_tags(raw_tags, required)
                 records.append({
                     "service": "RDS",
                     "id": db["DBInstanceIdentifier"],

@@ -41,14 +41,14 @@ def _parse_creds(access_key: str, secret_key: str, creds_file: UploadFile):
 
 
 # ── Helper: run a region scan in a thread ───────────────────────────────────
-def _scan_region(session, region: str) -> list:
+def _scan_region(session, region: str, services: list) -> list:
     regional = []
-    regional.extend(scan_ec2(session, region))
-    regional.extend(scan_lambda(session, region))
-    regional.extend(scan_rds(session, region))
-    regional.extend(scan_ebs(session, region))
-    regional.extend(scan_vpc(session, region))
-    regional.extend(scan_dynamodb(session, region))
+    if "ec2" in services: regional.extend(scan_ec2(session, region))
+    if "lambda" in services: regional.extend(scan_lambda(session, region))
+    if "rds" in services: regional.extend(scan_rds(session, region))
+    if "ebs" in services: regional.extend(scan_ebs(session, region))
+    if "vpc" in services: regional.extend(scan_vpc(session, region))
+    if "dynamodb" in services: regional.extend(scan_dynamodb(session, region))
     return regional
 
 
@@ -87,22 +87,28 @@ def scan(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
+    services: str = Form(default=""),
+    regions: str = Form(default=""),
 ):
     ak, sk = _parse_creds(access_key, secret_key, creds_file)
+    svc_list = [s.strip().lower() for s in services.split(",") if s.strip()]
+    if not svc_list: svc_list = ["ec2","lambda","iam","s3","rds","ebs","vpc","dynamodb","cloudfront"]
 
     try:
         session = get_session(ak or None, sk or None)
-        regions = get_all_regions(session)
+        all_regions = get_all_regions(session)
+        target_regions = [r.strip() for r in regions.split(",") if r.strip()]
+        regions_list = [r for r in all_regions if r in target_regions] if target_regions else all_regions
     except Exception as e:
         return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
 
     results = []
-    results.extend(scan_iam(session))
-    results.extend(scan_s3(session))
-    results.extend(scan_cloudfront(session))
+    if "iam" in svc_list: results.extend(scan_iam(session))
+    if "s3" in svc_list: results.extend(scan_s3(session))
+    if "cloudfront" in svc_list: results.extend(scan_cloudfront(session))
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(_scan_region, session, r): r for r in regions}
+        futures = {executor.submit(_scan_region, session, r, svc_list): r for r in regions_list}
         for future in as_completed(futures):
             try:
                 results.extend(future.result())
@@ -365,22 +371,25 @@ def export_inventory(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
+    services: str = Form(default=""),
 ):
     ak, sk = _parse_creds(access_key, secret_key, creds_file)
+    svc_list = [s.strip().lower() for s in services.split(",") if s.strip()]
+    if not svc_list: svc_list = ["ec2","lambda","iam","s3","rds","ebs","vpc","dynamodb","cloudfront"]
+
     try:
         session = get_session(ak or None, sk or None)
-        # FIX: always pass region_name to avoid NoRegionError
         regions = get_all_regions(session)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
     results = []
-    results.extend(scan_iam(session))
-    results.extend(scan_s3(session))
-    results.extend(scan_cloudfront(session))
+    if "iam" in svc_list: results.extend(scan_iam(session))
+    if "s3" in svc_list: results.extend(scan_s3(session))
+    if "cloudfront" in svc_list: results.extend(scan_cloudfront(session))
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(_scan_region, session, r) for r in regions]
+        futures = [executor.submit(_scan_region, session, r, svc_list) for r in regions]
         for f in as_completed(futures):
             try:
                 results.extend(f.result())

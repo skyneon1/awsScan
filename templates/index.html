@@ -197,6 +197,10 @@
       Users
       <span class="tab-badge" id="user-badge">—</span>
     </button>
+    <button class="dash-tab" data-tab="settings" onclick="showDashTab('settings')">
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      Settings
+    </button>
   </div>
 
   <!-- ── Resources Tab ── -->
@@ -331,7 +335,155 @@
     </div>
   </div>
 
+  <!-- ── Settings Tab ── -->
+  <div class="tab-panel" id="tab-settings">
+    <div class="dash-body">
+      <div class="section-header">
+        <div>
+          <h1>Global Settings</h1>
+          <p>Customize your scanning engine and display preferences.</p>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <!-- Scanner Config -->
+        <div class="settings-card open">
+          <div class="settings-card-header" onclick="toggleSettingsAccordion(this)">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="var(--accent)" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <h3>Scanner Services</h3>
+            <svg class="arrow" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div class="settings-collapse">
+            <div class="settings-content">
+              <p class="settings-desc">Enable or disable specific AWS services to speed up scan times.</p>
+              <div class="settings-options">
+                <label class="switch-item"><span>EC2 Instances</span><input type="checkbox" checked id="set-ec2"><i></i></label>
+                <label class="switch-item"><span>S3 Buckets</span><input type="checkbox" checked id="set-s3"><i></i></label>
+                <label class="switch-item"><span>RDS Databases</span><input type="checkbox" checked id="set-rds"><i></i></label>
+                <label class="switch-item"><span>Lambda Functions</span><input type="checkbox" checked id="set-lambda"><i></i></label>
+                <label class="switch-item"><span>VPC Networking</span><input type="checkbox" checked id="set-vpc"><i></i></label>
+              </div>
+              <div class="input-group" style="margin-top:16px">
+                <label>Limit Scan Regions (comma-sep)</label>
+                <input type="text" id="set-regions" placeholder="e.g. us-east-1, eu-west-1" style="width:100%">
+                <p style="font-size:10px; color:var(--muted); margin-top:4px">Leave blank to scan all available regions.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tagging Policy -->
+        <div class="settings-card">
+          <div class="settings-card-header" onclick="toggleSettingsAccordion(this)">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="var(--yellow)" stroke-width="2"><path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A2 2 0 013 12V7a4 4 0 014-4z"/></svg>
+            <h3>Tagging Policy</h3>
+            <svg class="arrow" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div class="settings-collapse">
+            <div class="settings-content">
+              <p class="settings-desc">Specify which tags are mandatory across your AWS environment.</p>
+              <div class="input-group">
+                <label>Required Tags (comma-sep)</label>
+                <input type="text" id="set-required-tags" value="Name, Environment, Owner, Project" style="width:100%">
+              </div>
+              <label class="switch-item" style="margin-top:16px"><span>Strict Mode</span><input type="checkbox" id="set-tag-strict"><i></i></label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Performance & API -->
+        <div class="settings-card">
+          <div class="settings-card-header" onclick="toggleSettingsAccordion(this)">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="var(--accent2)" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            <h3>Performance & API</h3>
+            <svg class="arrow" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div class="settings-collapse">
+            <div class="settings-content">
+              <p class="settings-desc">Adjust the engine's aggressiveness when talking to AWS.</p>
+              <div class="select-group">
+                <label>Polling Interval (Status refresh)</label>
+                <select id="set-poll-interval">
+                  <option value="2000">Fast (2s) - High API usage</option>
+                  <option value="4000" selected>Balanced (4s)</option>
+                  <option value="10000">Conservative (10s)</option>
+                </select>
+              </div>
+              <label class="switch-item" style="margin-top:16px"><span>Parallel Region Scan</span><input type="checkbox" checked id="set-parallel"><i></i></label>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- Display Config -->
+        <div class="settings-card">
+          <div class="settings-card-header" onclick="toggleSettingsAccordion(this)">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="var(--purple)" stroke-width="2"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <h3>Display & UI</h3>
+            <svg class="arrow" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div class="settings-collapse">
+            <div class="settings-content">
+              <p class="settings-desc">Control what metadata is visible in the resource overview.</p>
+              <div class="settings-options">
+                <label class="switch-item"><span>Show Public Badges</span><input type="checkbox" checked id="set-public-badge"><i></i></label>
+                <label class="switch-item"><span>Compact Row Height</span><input type="checkbox" id="set-compact"><i></i></label>
+                <label class="switch-item"><span>Relative Timestamps</span><input type="checkbox" checked id="set-relative-time"><i></i></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Audit Config -->
+        <div class="settings-card">
+          <div class="settings-card-header" onclick="toggleSettingsAccordion(this)">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="var(--red)" stroke-width="2"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            <h3>Security & Audit</h3>
+            <svg class="arrow" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div class="settings-collapse">
+            <div class="settings-content">
+              <p class="settings-desc">Fine-tune the security scanner sensitivity filters.</p>
+              <div class="settings-options">
+                <div class="select-group">
+                  <label>Min. Audit Severity</label>
+                  <select id="set-severity">
+                    <option value="INFO">All Findings (Info+)</option>
+                    <option value="LOW">Low and Above</option>
+                    <option value="MEDIUM">Medium and Above</option>
+                    <option value="HIGH" selected>High Severity Only</option>
+                  </select>
+                </div>
+                <label class="switch-item" style="margin-top:10px"><span>Auto-load Security</span><input type="checkbox" id="set-auto-security"><i></i></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Account Config -->
+        <div class="settings-card">
+          <div class="settings-card-header" onclick="toggleSettingsAccordion(this)">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="var(--green)" stroke-width="2"><path d="M12 11c0 3.517-1.009 6.799-2.753 9.571m-4.94-5.703a3.36 3.36 0 001.942.241 3.36 3.36 0 00.446-6.703 3.36 3.36 0 00-2.388 6.462z"/></svg>
+            <h3>Session & Privacy</h3>
+            <svg class="arrow" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path d="M19 9l-7 7-7-7"/></svg>
+          </div>
+          <div class="settings-collapse">
+            <div class="settings-content">
+              <p class="settings-desc">Manage how your session data and credentials are handled.</p>
+              <div class="settings-options">
+                <label class="switch-item"><span>Remember Region Cache</span><input type="checkbox" checked id="set-region-cache"><i></i></label>
+                <label class="switch-item"><span>Persistent Mode</span><input type="checkbox" id="set-persistent"><i></i></label>
+                <button class="btn-sm" style="margin-top:10px; width:100%" onclick="localStorage.clear(); location.reload()">Clear All App Data</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /dashboard-page -->
+
 
 <script src="/static/app.js"></script>
 <script>

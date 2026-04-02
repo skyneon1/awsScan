@@ -12,6 +12,57 @@ function toggleTheme() {
   localStorage.setItem('theme', isLight ? 'light' : 'dark');
 }
 
+// ── Settings Logic ─────────────────────────────────────────────────────────
+function getSettings() {
+  return {
+    ec2: document.getElementById('set-ec2')?.checked ?? true,
+    s3: document.getElementById('set-s3')?.checked ?? true,
+    rds: document.getElementById('set-rds')?.checked ?? true,
+    lambda: document.getElementById('set-lambda')?.checked ?? true,
+    vpc: document.getElementById('set-vpc')?.checked ?? true,
+    publicBadge: document.getElementById('set-public-badge')?.checked ?? true,
+    compact: document.getElementById('set-compact')?.checked ?? false,
+    severity: document.getElementById('set-severity')?.value ?? 'HIGH',
+    regions: document.getElementById('set-regions')?.value ?? '',
+    requiredTags: document.getElementById('set-required-tags')?.value ?? 'Name, Environment, Owner, Project',
+    pollInterval: document.getElementById('set-poll-interval')?.value ?? '4000'
+  };
+}
+
+
+function saveSettings() {
+  const s = getSettings();
+  localStorage.setItem('aws_scan_settings', JSON.stringify(s));
+  if (allResources.length > 0) renderTable();
+}
+
+function loadSettings() {
+  const raw = localStorage.getItem('aws_scan_settings');
+  if (!raw) return;
+  try {
+    const s = JSON.parse(raw);
+    const map = {
+      'set-ec2': s.ec2, 'set-s3': s.s3, 'set-rds': s.rds, 'set-lambda': s.lambda, 
+      'set-vpc': s.vpc, 'set-public-badge': s.publicBadge, 'set-compact': s.compact,
+      'set-regions': s.regions || '', 'set-required-tags': s.requiredTags || 'Name, Environment, Owner, Project',
+      'set-poll-interval': s.pollInterval || '4000'
+    };
+    for (const [id, val] of Object.entries(map)) {
+      const el = document.getElementById(id);
+      if (el) el.checked = !!val;
+    }
+    const sev = document.getElementById('set-severity');
+    if (sev) sev.value = s.severity || 'HIGH';
+  } catch(e) {}
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  loadSettings();
+  document.querySelectorAll('.settings-grid input, .settings-grid select').forEach(el => {
+    el.addEventListener('change', saveSettings);
+  });
+});
+
 // ── State ──────────────────────────────────────────────────────────────────
 let allResources = [];
 let activeFilter = 'all';
@@ -84,16 +135,29 @@ function goBack() {
 
 // ── Scanning animation ───────────────────────────────────────────────────────
 function animateChips() {
-  const chips = ['EC2','Lambda','IAM','S3','RDS'];
-  chips.forEach(c => { document.getElementById('chip-' + c).className = 'svc-chip'; });
+  const settings = getSettings();
+  const allChips = ['EC2','Lambda','IAM','S3','RDS','EBS','VPC','DynamoDB','CloudFront'];
+  const enabled = allChips.filter(c => settings[c.toLowerCase()] !== false);
+  
+  // Hide irrelevant chips
+  allChips.forEach(c => {
+    const el = document.getElementById('chip-' + c);
+    if(el) el.style.display = enabled.includes(c) ? 'inline-block' : 'none';
+  });
+
+  enabled.forEach(c => { document.getElementById('chip-' + c).className = 'svc-chip'; });
   let i = 0;
   const iv = setInterval(() => {
-    if (i > 0) document.getElementById('chip-' + chips[i - 1]).className = 'svc-chip done';
-    if (i < chips.length) {
-      document.getElementById('chip-' + chips[i]).className = 'svc-chip scanning';
+    if (i > 0) {
+      const prevEl = document.getElementById('chip-' + enabled[i - 1]);
+      if(prevEl) prevEl.className = 'svc-chip done';
+    }
+    if (i < enabled.length) {
+      const curEl = document.getElementById('chip-' + enabled[i]);
+      if(curEl) curEl.className = 'svc-chip scanning';
       i++;
     } else { clearInterval(iv); }
-  }, 900);
+  }, 800);
 }
 
 // ── Main scan ────────────────────────────────────────────────────────────────
@@ -104,7 +168,7 @@ async function startConnect() {
   const ak = document.getElementById('access_key').value.trim();
   const sk = document.getElementById('secret_key').value.trim();
 
-  if (activeMethod === 'keys' && (!ak || !sk)) {
+  if (activeMethod === 'keys' && (!ak && !sk && !credCache.ak)) {
     errBox.textContent = 'Please enter both Access Key ID and Secret Access Key.';
     errBox.classList.add('show'); return;
   }
@@ -113,15 +177,23 @@ async function startConnect() {
     errBox.classList.add('show'); return;
   }
 
-  credCache = { ak, sk };
+  const settings = getSettings();
+  const fd = new FormData();
+  if (activeMethod === 'keys') { 
+    fd.append('access_key', ak || credCache.ak); 
+    fd.append('secret_key', sk || credCache.sk); 
+  } else { 
+    fd.append('creds_file', uploadedFile); 
+  }
+
+  // Send enabled services to backend
+  const services = ['ec2','lambda','iam','s3','rds','ebs','vpc','dynamodb','cloudfront']
+                   .filter(s => settings[s] !== false);
+  fd.append('services', services.join(','));
+
   document.getElementById('connect-btn').disabled = true;
   showPage('scan-page');
-  document.getElementById('scan-step').textContent = 'Discovering regions…';
   animateChips();
-
-  const fd = new FormData();
-  if (activeMethod === 'keys') { fd.append('access_key', ak); fd.append('secret_key', sk); }
-  else { fd.append('creds_file', uploadedFile); }
 
   try {
     const res  = await fetch('/scan', { method: 'POST', body: fd });
@@ -136,22 +208,29 @@ async function startConnect() {
     }
 
     allResources = data.resources || [];
-    buildDashboard(data.summary);
-    renderTable();
-    ['EC2','Lambda','IAM','S3','RDS'].forEach(c => {
-      document.getElementById('chip-' + c).className = 'svc-chip done';
-    });
+    credCache = { ak: ak || credCache.ak, sk: sk || credCache.sk };
+    
+    // Privacy: Clear fields if not persistent
+    if (!settings.persistent) {
+      document.getElementById('access_key').value = '';
+      document.getElementById('secret_key').value = '';
+    }
+
     setTimeout(() => {
       showPage('dashboard-page');
       showDashTab('resources');
+      buildDashboard(data.summary);
+      renderTable();
       document.getElementById('connect-btn').disabled = false;
       
-      // Proactively load secondary data in the background
-      loadSecurity();
-      loadCosts();
-      loadTags();
-      loadUsers();
-    }, 500);
+      // Auto-load secondary data if configured
+      if (document.getElementById('set-auto-security')?.checked) {
+        loadSecurity();
+        loadCosts();
+        loadTags();
+        loadUsers();
+      }
+    }, 1200);
 
   } catch (err) {
     showPage('login-page');
@@ -271,12 +350,13 @@ function renderTable() {
   if (rows.length === 0) { tbody.innerHTML = ''; empty.style.display = 'block'; return; }
   empty.style.display = 'none';
 
+  const settings = getSettings();
   tbody.innerHTML = rows.map(r => `
-    <tr>
+    <tr class="${settings.compact ? 'compact' : ''}">
       <td><span class="svc-badge svc-${r.service}">${r.service}</span></td>
       <td class="mono">
         ${r.name}
-        ${r.extra && r.extra['Public IP'] && r.extra['Public IP'] !== 'None' ? '<span class="badge-public">Public</span>' : ''}
+        ${settings.publicBadge && r.extra && r.extra['Public IP'] && r.extra['Public IP'] !== 'None' ? '<span class="badge-public">Public</span>' : ''}
       </td>
       <td style="color:var(--muted2);font-size:12px">${r.type}</td>
       <td style="color:var(--muted2);font-size:12px">${r.region}</td>
@@ -333,7 +413,17 @@ function renderSecurity() {
   badge.className = 'tab-badge ' + (crit > 0 ? 'red' : crit > 0 ? 'yellow' : '');
 
   let findings = d.findings || [];
-  if (secFilter !== 'ALL') findings = findings.filter(f => f.severity === secFilter);
+  const settings = getSettings();
+  
+  // Apply severity threshold from settings if no specific filter is active
+  const sevMap = { 'INFO': 0, 'LOW': 1, 'MEDIUM': 2, 'HIGH': 3, 'CRITICAL': 4 };
+  const threshold = settings.severity || 'INFO';
+  
+  if (secFilter === 'ALL') {
+    findings = findings.filter(f => sevMap[f.severity] >= sevMap[threshold]);
+  } else {
+    findings = findings.filter(f => f.severity === secFilter);
+  }
 
   const sevBars = ['CRITICAL','HIGH','MEDIUM','LOW','INFO'].map(s => `
     <div class="sev-card sev-${s}" style="cursor:pointer" onclick="setSevFilter('${s}')">
@@ -850,3 +940,11 @@ async function exportCSV() {
     alert('Export error: ' + e.message);
   }
 }
+
+function toggleSettingsAccordion(header) {
+  const card = header.closest('.settings-card');
+  const isOpen = card.classList.contains('open');
+  document.querySelectorAll('.settings-card').forEach(c => c.classList.remove('open'));
+  if (!isOpen) card.classList.add('open');
+}
+
