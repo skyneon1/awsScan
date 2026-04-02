@@ -1,3 +1,17 @@
+// ── Theme ───────────────────────────────────────────────────────────────────
+function initTheme() {
+  const theme = localStorage.getItem('theme') || 'dark';
+  if (theme === 'light') {
+    document.body.classList.add('light-mode');
+  }
+}
+initTheme();
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-mode');
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+}
+
 // ── State ──────────────────────────────────────────────────────────────────
 let allResources = [];
 let activeFilter = 'all';
@@ -162,8 +176,13 @@ function buildDashboard(summary) {
     <div class="stat-card c-green"><div class="stat-label">Active</div><div class="stat-val">${summary.active}</div><div class="stat-sub">running / available</div></div>
     <div class="stat-card c-red"><div class="stat-label">Inactive</div><div class="stat-val">${summary.inactive}</div><div class="stat-sub">stopped / unused</div></div>
   `;
+  const svcColors = {
+    'EC2': 'c-blue', 'RDS': 'c-cyan', 'Lambda': 'c-purple', 'S3': 'c-yellow',
+    'IAM': 'c-teal', 'VPC': 'c-green', 'DynamoDB': 'c-blue', 'CloudFront': 'c-pink'
+  };
   for (const [svc, c] of Object.entries(byService)) {
-    cards += `<div class="stat-card c-gray"><div class="stat-label">${svc}</div><div class="stat-val">${c.active + c.inactive}</div><div class="stat-sub">${c.active} active</div></div>`;
+    const cls = svcColors[svc] || 'c-gray';
+    cards += `<div class="stat-card ${cls}"><div class="stat-label">${svc}</div><div class="stat-val">${c.active + c.inactive}</div><div class="stat-sub">${c.active} active</div></div>`;
   }
   document.getElementById('summary-grid').innerHTML = cards;
 
@@ -210,7 +229,7 @@ function drawDonut(containerId, byService, total) {
   }
 
   const svg = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}
-    <circle cx="${cx}" cy="${cy}" r="${r - strokeW}" fill="#13151f"/>
+    <circle cx="${cx}" cy="${cy}" r="${r - strokeW}" fill="var(--bg2)"/>
     </svg>`;
 
   const legend = entries.map(e => `
@@ -241,10 +260,9 @@ function setSearch(q) { searchQuery = q.toLowerCase(); renderTable(); }
 
 function renderTable() {
   let rows = allResources;
-  if (activeFilter === 'active')   rows = rows.filter(r => r.active);
-  if (activeFilter === 'inactive') rows = rows.filter(r => !r.active);
-  if (['EC2','Lambda','IAM','S3','RDS'].includes(activeFilter))
-    rows = rows.filter(r => r.service === activeFilter);
+  if (activeFilter === 'active') rows = rows.filter(r => r.active);
+  else if (activeFilter === 'inactive') rows = rows.filter(r => !r.active);
+  else if (activeFilter !== 'all') rows = rows.filter(r => r.service === activeFilter);
   if (searchQuery)
     rows = rows.filter(r => r.name?.toLowerCase().includes(searchQuery) || r.id?.toLowerCase().includes(searchQuery));
 
