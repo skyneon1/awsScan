@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Request, Form, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import configparser
+import csv
+import io
 
 from scanner.base import get_session, get_all_regions
 from scanner.ec2 import scan_ec2
@@ -24,6 +26,57 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
+# ── Helper: parse credentials from form or uploaded file ────────────────────
+def _parse_creds(access_key: str, secret_key: str, creds_file: UploadFile):
+    ak, sk = access_key.strip(), secret_key.strip()
+    if creds_file and creds_file.filename:
+        content = creds_file.file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        section = "default" if "default" in config else (config.sections() or [None])[0]
+        if section:
+            ak = config[section].get("aws_access_key_id", "").strip()
+            sk = config[section].get("aws_secret_access_key", "").strip()
+    return ak, sk
+
+
+# ── Helper: run a region scan in a thread ───────────────────────────────────
+def _scan_region(session, region: str) -> list:
+    regional = []
+    regional.extend(scan_ec2(session, region))
+    regional.extend(scan_lambda(session, region))
+    regional.extend(scan_rds(session, region))
+    regional.extend(scan_ebs(session, region))
+    regional.extend(scan_vpc(session, region))
+    regional.extend(scan_dynamodb(session, region))
+    return regional
+
+
+# ── Helper: build summary dict from resource list ───────────────────────────
+def _build_summary(resources: list) -> dict:
+    summary = {
+        "total": len(resources),
+        "active": sum(1 for r in resources if r.get("active")),
+        "inactive": sum(1 for r in resources if not r.get("active")),
+        "by_service": {},
+        "by_region": {},
+    }
+    for r in resources:
+        svc = r["service"]
+        reg = r.get("region", "global")
+        if svc not in summary["by_service"]:
+            summary["by_service"][svc] = {"active": 0, "inactive": 0}
+        key = "active" if r.get("active") else "inactive"
+        summary["by_service"][svc][key] += 1
+        if reg != "global":
+            summary["by_region"][reg] = summary["by_region"].get(reg, 0) + 1
+    return summary
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# ROUTES
+# ────────────────────────────────────────────────────────────────────────────
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
@@ -35,15 +88,7 @@ def scan(
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
 ):
-    ak, sk = access_key.strip(), secret_key.strip()
-
-    if creds_file and creds_file.filename:
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
 
     try:
         session = get_session(ak or None, sk or None)
@@ -52,23 +97,12 @@ def scan(
         return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
 
     results = []
-
     results.extend(scan_iam(session))
     results.extend(scan_s3(session))
     results.extend(scan_cloudfront(session))
 
-    def scan_region(region):
-        regional = []
-        regional.extend(scan_ec2(session, region))
-        regional.extend(scan_lambda(session, region))
-        regional.extend(scan_rds(session, region))
-        regional.extend(scan_ebs(session, region))
-        regional.extend(scan_vpc(session, region))
-        regional.extend(scan_dynamodb(session, region))
-        return regional
-
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(scan_region, r): r for r in regions}
+        futures = {executor.submit(_scan_region, session, r): r for r in regions}
         for future in as_completed(futures):
             try:
                 results.extend(future.result())
@@ -78,29 +112,9 @@ def scan(
     resources = [r for r in results if "error" not in r]
     errors    = [r for r in results if "error" in r]
 
-    summary = {
-        "total":    len(resources),
-        "active":   len([r for r in resources if r.get("active")]),
-        "inactive": len([r for r in resources if not r.get("active")]),
-        "by_service": {},
-        "by_region": {},
-    }
-    for r in resources:
-        svc = r["service"]
-        reg = r.get("region", "global")
-        if svc not in summary["by_service"]:
-            summary["by_service"][svc] = {"active": 0, "inactive": 0}
-        if r.get("active"):
-            summary["by_service"][svc]["active"] += 1
-        else:
-            summary["by_service"][svc]["inactive"] += 1
-        # Regional breakdown
-        if reg not in ("global",):
-            summary["by_region"][reg] = summary["by_region"].get(reg, 0) + 1
-
     return JSONResponse({
         "resources": resources,
-        "summary":   summary,
+        "summary":   _build_summary(resources),
         "errors":    errors,
     })
 
@@ -109,19 +123,9 @@ def scan(
 def scan_security(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
-    session_token: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
 ):
-    """Run security audit across all services and regions."""
-    ak, sk = access_key.strip(), secret_key.strip()
-
-    if creds_file and creds_file.filename:
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
 
     try:
         session = get_session(ak or None, sk or None)
@@ -133,15 +137,15 @@ def scan_security(
     findings.extend(audit_iam(session))
     findings.extend(audit_s3(session))
 
-    def audit_region(region):
-        regional = []
-        regional.extend(audit_ec2(session, region))
-        regional.extend(audit_rds(session, region))
-        regional.extend(audit_cloudtrail(session, region))
-        return regional
+    def _audit_region(region):
+        out = []
+        out.extend(audit_ec2(session, region))
+        out.extend(audit_rds(session, region))
+        out.extend(audit_cloudtrail(session, region))
+        return out
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(audit_region, r): r for r in regions}
+        futures = {executor.submit(_audit_region, r): r for r in regions}
         for future in as_completed(futures):
             try:
                 findings.extend(future.result())
@@ -156,11 +160,7 @@ def scan_security(
         sev = f.get("severity", "INFO")
         counts[sev] = counts.get(sev, 0) + 1
 
-    return JSONResponse({
-        "findings": findings,
-        "total": len(findings),
-        "counts": counts,
-    })
+    return JSONResponse({"findings": findings, "total": len(findings), "counts": counts})
 
 
 @app.post("/scan/costs")
@@ -169,25 +169,13 @@ def scan_costs_endpoint(
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
 ):
-    """Estimate monthly costs for running resources."""
-    ak, sk = access_key.strip(), secret_key.strip()
-
-    if creds_file and creds_file.filename:
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
-
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
     try:
         session = get_session(ak or None, sk or None)
     except Exception as e:
         return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
-
     try:
-        data = scan_costs(session)
-        return JSONResponse(data)
+        return JSONResponse(scan_costs(session))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -198,31 +186,19 @@ def scan_tags_endpoint(
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
 ):
-    """Scan resources for tag compliance."""
-    ak, sk = access_key.strip(), secret_key.strip()
-
-    if creds_file and creds_file.filename:
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
-
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
     try:
         session = get_session(ak or None, sk or None)
     except Exception as e:
         return JSONResponse({"error": f"Failed to connect to AWS: {str(e)}"}, status_code=400)
-
     try:
         records = scan_tag_compliance(session)
         compliant = [r for r in records if r["compliant"]]
-        non_compliant = [r for r in records if not r["compliant"]]
         return JSONResponse({
             "records": records,
             "total": len(records),
             "compliant": len(compliant),
-            "non_compliant": len(non_compliant),
+            "non_compliant": len(records) - len(compliant),
             "compliance_rate": round(len(compliant) / len(records) * 100, 1) if records else 100.0,
         })
     except Exception as e:
@@ -235,15 +211,7 @@ def scan_users_endpoint(
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
 ):
-    """Return detailed IAM user data."""
-    ak, sk = access_key.strip(), secret_key.strip()
-    if creds_file and creds_file.filename:
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
     try:
         session = get_session(ak or None, sk or None)
     except Exception as e:
@@ -265,13 +233,6 @@ def perform_action(
     region: str = Form(default="us-east-1"),
     extra: str = Form(default=""),
 ):
-    """
-    Perform a control action on an AWS resource.
-    service: ec2 | rds | iam_key
-    action:  start | stop | reboot | enable | disable
-    resource_id: instance-id / db-id / access-key-id
-    extra: for iam_key actions — the username
-    """
     ak, sk = access_key.strip(), secret_key.strip()
     try:
         session = get_session(ak or None, sk or None)
@@ -306,12 +267,12 @@ def perform_action(
         elif service == "cloudfront":
             client = session.client("cloudfront")
             dist = client.get_distribution_config(Id=resource_id)
-            config = dist['DistributionConfig']
-            etag = dist['ETag']
+            config = dist["DistributionConfig"]
+            etag = dist["ETag"]
             if action == "start":
-                config['Enabled'] = True
+                config["Enabled"] = True
             elif action == "stop":
-                config['Enabled'] = False
+                config["Enabled"] = False
             else:
                 return JSONResponse({"error": f"Unknown CloudFront action: {action}"}, status_code=400)
             client.update_distribution(Id=resource_id, IfMatch=etag, DistributionConfig=config)
@@ -325,14 +286,13 @@ def perform_action(
 
         elif service == "iam_key":
             client = session.client("iam")
-            username = extra  # extra holds the IAM username
-            if not username:
+            if not extra:
                 return JSONResponse({"error": "username required for IAM key action"}, status_code=400)
             status_map = {"enable": "Active", "disable": "Inactive"}
             if action not in status_map:
                 return JSONResponse({"error": f"Unknown IAM key action: {action}"}, status_code=400)
             client.update_access_key(
-                UserName=username,
+                UserName=extra,
                 AccessKeyId=resource_id,
                 Status=status_map[action],
             )
@@ -345,6 +305,7 @@ def perform_action(
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
+
 @app.post("/status")
 def get_resource_status(
     access_key: str = Form(default=""),
@@ -354,15 +315,7 @@ def get_resource_status(
     region: str = Form(default="us-east-1"),
     creds_file: UploadFile = File(default=None),
 ):
-    ak, sk = access_key.strip(), secret_key.strip()
-    if creds_file and creds_file.filename:
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
-        
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
     try:
         session = get_session(ak or None, sk or None)
     except Exception as e:
@@ -374,30 +327,37 @@ def get_resource_status(
             res = client.describe_instances(InstanceIds=[resource_id])
             state = res["Reservations"][0]["Instances"][0]["State"]["Name"]
             return JSONResponse({"state": state, "active": state == "running"})
+
         elif service == "rds":
             client = session.client("rds", region_name=region)
             res = client.describe_db_instances(DBInstanceIdentifier=resource_id)
             state = res["DBInstances"][0]["DBInstanceStatus"]
             return JSONResponse({"state": state, "active": state == "available"})
+
         elif service == "cloudfront":
             client = session.client("cloudfront")
             res = client.get_distribution(Id=resource_id)
             state = res["Distribution"]["Status"]
             enabled = res["Distribution"]["DistributionConfig"]["Enabled"]
-            active = (state == "Deployed") and enabled
-            return JSONResponse({"state": state, "active": active})
+            return JSONResponse({"state": state, "active": state == "Deployed" and enabled})
+
         elif service == "dynamodb":
             client = session.client("dynamodb", region_name=region)
             res = client.describe_table(TableName=resource_id)
             state = res["Table"]["TableStatus"].lower()
             return JSONResponse({"state": state, "active": state == "active"})
+
         else:
             return JSONResponse({"error": f"Polling unsupported for {service}"}, status_code=400)
+
     except Exception as e:
-        error_msg = str(e)
-        if "NotFound" in error_msg:
-            return JSONResponse({"state": "terminated" if service=="ec2" else "deleted", "active": False})
-        return JSONResponse({"error": error_msg}, status_code=500)
+        err = str(e)
+        if "NotFound" in err or "not found" in err.lower():
+            return JSONResponse({
+                "state": "terminated" if service == "ec2" else "deleted",
+                "active": False
+            })
+        return JSONResponse({"error": err}, status_code=500)
 
 
 @app.post("/export")
@@ -406,65 +366,50 @@ def export_inventory(
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
 ):
-    """Scan and return a downloadable CSV of current resources."""
-    ak, sk = access_key.strip(), secret_key.strip()
-    if creds_file and creds_file.filename:
-        # Re-read for consistency if needed, though creds_file.file is already at end after scan
-        creds_file.file.seek(0)
-        content = creds_file.file.read()
-        config = configparser.ConfigParser()
-        config.read_string(content.decode("utf-8"))
-        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
-        ak = profile.get("aws_access_key_id", "").strip()
-        sk = profile.get("aws_secret_access_key", "").strip()
-
+    ak, sk = _parse_creds(access_key, secret_key, creds_file)
     try:
         session = get_session(ak or None, sk or None)
-        import io, csv
-        from fastapi.responses import StreamingResponse
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-        
-        results = []
-        results.extend(scan_iam(session))
-        results.extend(scan_s3(session))
-        results.extend(scan_cloudfront(session))
-        
-        regions = session.client("ec2").describe_regions()["Regions"]
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = []
-            for r in regions:
-                reg = r["RegionName"]
-                futures.append(executor.submit(scan_ec2, session, reg))
-                futures.append(executor.submit(scan_lambda, session, reg))
-                futures.append(executor.submit(scan_rds, session, reg))
-                futures.append(executor.submit(scan_ebs, session, reg))
-                futures.append(executor.submit(scan_vpc, session, reg))
-                futures.append(executor.submit(scan_dynamodb, session, reg))
-            for f in as_completed(futures):
-                results.extend(f.result())
-        
-        clean = [r for r in results if r and "error" not in r]
-        output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=["service", "name", "id", "type", "region", "state", "active", "launched", "extra"])
-        writer.writeheader()
-        for r in clean:
-            extra_str = "; ".join([f"{k}:{v}" for k,v in r.get("extra", {}).items()])
-            writer.writerow({
-                "service": r["service"],
-                "name": r["name"],
-                "id": r["id"],
-                "type": r["type"],
-                "region": r["region"],
-                "state": r["state"],
-                "active": r["active"],
-                "launched": r["launched"],
-                "extra": extra_str
-            })
-        output.seek(0)
-        return StreamingResponse(
-            io.BytesIO(output.getvalue().encode("utf-8")),
-            media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=aws_inventory.csv"}
-        )
+        # FIX: always pass region_name to avoid NoRegionError
+        regions = get_all_regions(session)
     except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    results = []
+    results.extend(scan_iam(session))
+    results.extend(scan_s3(session))
+    results.extend(scan_cloudfront(session))
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(_scan_region, session, r) for r in regions]
+        for f in as_completed(futures):
+            try:
+                results.extend(f.result())
+            except Exception:
+                pass
+
+    clean = [r for r in results if r and "error" not in r]
+
+    output = io.StringIO()
+    fieldnames = ["service", "name", "id", "type", "region", "state", "active", "launched", "extra"]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    for r in clean:
+        extra_str = "; ".join(f"{k}:{v}" for k, v in r.get("extra", {}).items())
+        writer.writerow({
+            "service": r.get("service", ""),
+            "name":    r.get("name", ""),
+            "id":      r.get("id", ""),
+            "type":    r.get("type", ""),
+            "region":  r.get("region", ""),
+            "state":   r.get("state", ""),
+            "active":  r.get("active", ""),
+            "launched":r.get("launched", ""),
+            "extra":   extra_str,
+        })
+
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=aws_inventory.csv"}
+    )
