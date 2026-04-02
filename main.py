@@ -8,7 +8,7 @@ import configparser
 from scanner.base import get_session, get_all_regions
 from scanner.ec2 import scan_ec2
 from scanner.lambda_fn import scan_lambda
-from scanner.iam import scan_iam
+from scanner.iam import scan_iam, scan_iam_detailed
 from scanner.s3 import scan_s3
 from scanner.rds import scan_rds
 from scanner.security import audit_iam, audit_s3, audit_ec2, audit_rds, audit_cloudtrail
@@ -217,5 +217,98 @@ async def scan_tags_endpoint(
             "non_compliant": len(non_compliant),
             "compliance_rate": round(len(compliant) / len(records) * 100, 1) if records else 100.0,
         })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/scan/users")
+async def scan_users_endpoint(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    creds_file: UploadFile = File(default=None),
+):
+    """Return detailed IAM user data."""
+    ak, sk = access_key.strip(), secret_key.strip()
+    if creds_file and creds_file.filename:
+        content = await creds_file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
+        ak = profile.get("aws_access_key_id", "").strip()
+        sk = profile.get("aws_secret_access_key", "").strip()
+    try:
+        session = get_session(ak or None, sk or None)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to connect: {str(e)}"}, status_code=400)
+    try:
+        users = scan_iam_detailed(session)
+        return JSONResponse({"users": users, "total": len(users)})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/action")
+async def perform_action(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    service: str = Form(...),
+    action: str = Form(...),
+    resource_id: str = Form(...),
+    region: str = Form(default="us-east-1"),
+    extra: str = Form(default=""),
+):
+    """
+    Perform a control action on an AWS resource.
+    service: ec2 | rds | iam_key
+    action:  start | stop | reboot | enable | disable
+    resource_id: instance-id / db-id / access-key-id
+    extra: for iam_key actions — the username
+    """
+    ak, sk = access_key.strip(), secret_key.strip()
+    try:
+        session = get_session(ak or None, sk or None)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    try:
+        if service == "ec2":
+            client = session.client("ec2", region_name=region)
+            if action == "start":
+                client.start_instances(InstanceIds=[resource_id])
+            elif action == "stop":
+                client.stop_instances(InstanceIds=[resource_id])
+            elif action == "reboot":
+                client.reboot_instances(InstanceIds=[resource_id])
+            else:
+                return JSONResponse({"error": f"Unknown EC2 action: {action}"}, status_code=400)
+
+        elif service == "rds":
+            client = session.client("rds", region_name=region)
+            if action == "start":
+                client.start_db_instance(DBInstanceIdentifier=resource_id)
+            elif action == "stop":
+                client.stop_db_instance(DBInstanceIdentifier=resource_id)
+            else:
+                return JSONResponse({"error": f"Unknown RDS action: {action}"}, status_code=400)
+
+        elif service == "iam_key":
+            client = session.client("iam")
+            username = extra  # extra holds the IAM username
+            if not username:
+                return JSONResponse({"error": "username required for IAM key action"}, status_code=400)
+            status_map = {"enable": "Active", "disable": "Inactive"}
+            if action not in status_map:
+                return JSONResponse({"error": f"Unknown IAM key action: {action}"}, status_code=400)
+            client.update_access_key(
+                UserName=username,
+                AccessKeyId=resource_id,
+                Status=status_map[action],
+            )
+
+        else:
+            return JSONResponse({"error": f"Unknown service: {service}"}, status_code=400)
+
+        return JSONResponse({"ok": True, "service": service, "action": action, "resource_id": resource_id})
+
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

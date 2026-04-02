@@ -8,6 +8,7 @@ let credCache    = { ak: '', sk: '' };
 let securityData = null;
 let costData     = null;
 let tagData      = null;
+let userData     = null;
 
 // ── Auth helpers ────────────────────────────────────────────────────────────
 function getFormData() {
@@ -59,7 +60,7 @@ function showDashTab(id) {
 }
 
 function goBack() {
-  allResources = []; securityData = null; costData = null; tagData = null;
+  allResources = []; securityData = null; costData = null; tagData = null; userData = null;
   uploadedFile = null; credCache = { ak: '', sk: '' };
   document.getElementById('access_key').value = '';
   document.getElementById('secret_key').value = '';
@@ -255,6 +256,12 @@ function renderTable() {
       <td style="color:var(--muted2);font-size:12px">${r.state}</td>
       <td><span class="status-dot ${r.active ? 'active' : 'inactive'}">${r.active ? 'Active' : 'Inactive'}</span></td>
       <td style="color:var(--muted);font-size:12px">${fmtDate(r.launched)}</td>
+      <td>
+        ${ r.service === 'EC2' && r.state === 'running' ? `<button class="action-btn" onclick="performAction('ec2', 'stop', '${r.id}', '${r.region}')">Stop</button><button class="action-btn" onclick="performAction('ec2', 'reboot', '${r.id}', '${r.region}')">Reboot</button>` : '' }
+        ${ r.service === 'EC2' && r.state === 'stopped' ? `<button class="action-btn" onclick="performAction('ec2', 'start', '${r.id}', '${r.region}')">Start</button>` : '' }
+        ${ r.service === 'RDS' && r.state === 'available' ? `<button class="action-btn" onclick="performAction('rds', 'stop', '${r.id}', '${r.region}')">Stop</button>` : '' }
+        ${ r.service === 'RDS' && r.state === 'stopped' ? `<button class="action-btn" onclick="performAction('rds', 'start', '${r.id}', '${r.region}')">Start</button>` : '' }
+      </td>
     </tr>`).join('');
 }
 
@@ -483,4 +490,102 @@ function fmtDate(d) {
   if (!d || d === 'N/A') return '—';
   try { return new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }); }
   catch { return d; }
+}
+
+// ── Help Modal ────────────────────────────────────────────────────────────────
+function openHelpModal() { document.getElementById('help-modal').classList.add('show'); }
+function closeHelpModal() { document.getElementById('help-modal').classList.remove('show'); }
+
+// ── Resource Action ───────────────────────────────────────────────────────────
+async function performAction(service, action, resourceId, region, extra = '') {
+  if(!confirm(`Are you sure you want to ${action} ${resourceId}?`)) return;
+  const fd = getFormData();
+  fd.append('service', service);
+  fd.append('action', action);
+  fd.append('resource_id', resourceId);
+  fd.append('region', region);
+  fd.append('extra', extra);
+  try {
+    const res = await fetch('/action', {method: 'POST', body: fd});
+    const d = await res.json();
+    if(d.error) alert('Error: ' + d.error);
+    else {
+      alert(`Successfully submitted ${action} for ${resourceId}`);
+      // Optimistic refresh logic could go here
+    }
+  } catch(e) {
+    alert('Network error: ' + e.message);
+  }
+}
+
+// ── Users Tab ─────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  if (userData) { renderUsers(); return; }
+  document.getElementById('user-content').innerHTML = `<div class="loading-row"><div class="spinner"></div>Loading detailed IAM data…</div>`;
+  const fd = getFormData();
+  try {
+    const res = await fetch('/scan/users', { method: 'POST', body: fd });
+    userData = await res.json();
+    if (userData.error) {
+      document.getElementById('user-content').innerHTML = `<div class="empty-state"><strong>Error</strong><p>${userData.error}</p></div>`;
+      return;
+    }
+    renderUsers();
+  } catch (e) {
+    document.getElementById('user-content').innerHTML = `<div class="empty-state"><strong>Network error</strong><p>${e.message}</p></div>`;
+  }
+}
+
+function renderUsers() {
+  const d = userData;
+  const badge = document.getElementById('user-badge');
+  if (badge) badge.textContent = d.total || 0;
+  
+  if (!d.users || d.users.length === 0) {
+    document.getElementById('user-content').innerHTML = `<div class="empty-state">No users found.</div>`;
+    return;
+  }
+  
+  const html = d.users.map(u => {
+    const keysHtml = u.access_keys.length > 0 ? u.access_keys.map(k => `
+      <div class="key-row">
+        <div>
+          <div style="font-family:monospace; color:var(--text); font-size:13px">${k.key_id} <span class="status-dot ${k.status==='Active'?'active':'inactive'}">${k.status}</span></div>
+          <div style="font-size:11px; margin-top:4px; color:var(--muted)">Last used: ${k.last_used} (${k.last_service} in ${k.last_region}) | Age: ${k.age_days != null ? k.age_days + ' days' : 'N/A'}</div>
+        </div>
+        <div>
+          ${k.status === 'Active' ? `<button class="action-btn" onclick="performAction('iam_key','disable','${k.key_id}','global','${u.username}')">Disable</button>` : `<button class="action-btn" onclick="performAction('iam_key','enable','${k.key_id}','global','${u.username}')">Enable</button>`}
+        </div>
+      </div>
+    `).join('') : '<div style="font-size:12px;color:var(--muted)">No access keys</div>';
+    
+    return `
+      <div class="user-card">
+        <div class="user-header">
+          <div>
+            <div class="user-name">
+              ${u.username} 
+              ${u.is_admin ? '<span class="admin-badge">ADMIN</span>' : ''}
+              ${u.mfa_enabled ? '<span style="color:var(--green);font-size:12px">✓ MFA</span>' : '<span style="color:var(--red);font-size:12px">✗ No MFA</span>'}
+            </div>
+            <div class="user-meta">ARN: ${u.arn} | Created: ${fmtDate(u.created)} | Last Login: ${u.last_login !== 'Never' ? fmtDate(u.last_login) : 'Never'}</div>
+          </div>
+        </div>
+        <div class="user-grid">
+          <div>
+            <strong style="display:block; margin-bottom:8px; color:var(--text);">Groups &amp; Policies</strong>
+            <div>Groups: ${u.groups.length ? u.groups.map(g => `<li>${g}</li>`).join('') : 'None'}</div>
+            <div style="margin-top:8px">Attached: ${u.policies.length ? u.policies.map(p => `<li>${p}</li>`).join('') : 'None'}</div>
+            <div style="margin-top:8px">Inline: ${u.inline_policies.length ? u.inline_policies.map(p => `<li>${p}</li>`).join('') : 'None'}</div>
+          </div>
+          <div>
+            <strong style="display:block; margin-bottom:8px; color:var(--text);">Access Keys</strong>
+            ${keysHtml}
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  document.getElementById('user-content').innerHTML = html;
 }
