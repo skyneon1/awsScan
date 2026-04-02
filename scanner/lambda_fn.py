@@ -13,7 +13,12 @@ def scan_lambda(session, region: str) -> list[dict]:
                 "active": True,
                 "region": region,
                 "launched": str(fn.get("LastModified", "N/A")),
-                "service": "Lambda"
+                "service": "Lambda",
+                "extra": {
+                    "Memory": f"{fn.get('MemorySize', 'N/A')} MB",
+                    "Timeout": f"{fn.get('Timeout', 'N/A')}s",
+                    "Handler": fn.get("Handler", "N/A")
+                }
             })
         return functions
     except Exception as e:

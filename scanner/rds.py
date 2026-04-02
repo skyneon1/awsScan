@@ -14,7 +14,12 @@ def scan_rds(session, region: str) -> list[dict]:
                 "active": state == "available",
                 "region": region,
                 "launched": str(db.get("InstanceCreateTime", "N/A")),
-                "service": "RDS"
+                "service": "RDS",
+                "extra": {
+                    "Endpoint": db.get("Endpoint", {}).get("Address", "None"),
+                    "Port": db.get("Endpoint", {}).get("Port", "None"),
+                    "VPC ID": db.get("DBSubnetGroup", {}).get("VpcId", "None")
+                }
             })
         return instances
     except Exception as e:

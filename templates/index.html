@@ -92,6 +92,9 @@
         <button class="connect-btn" id="connect-btn" onclick="startConnect()">
           Connect &amp; Scan
         </button>
+        <button class="connect-btn" type="button" onclick="startDemo()" style="margin-top:10px; background:var(--bg3); border:1px solid var(--border2); color:var(--text)">
+          Explore Live Demo (No account needed)
+        </button>
       </div>
     </div>
 
@@ -135,6 +138,9 @@
     <div class="svc-chip" id="chip-IAM">IAM</div>
     <div class="svc-chip" id="chip-S3">S3</div>
     <div class="svc-chip" id="chip-RDS">RDS</div>
+    <div class="svc-chip" id="chip-VPC">VPC</div>
+    <div class="svc-chip" id="chip-DynamoDB">DynamoDB</div>
+    <div class="svc-chip" id="chip-CloudFront">CloudFront</div>
   </div>
   <div class="scan-step" id="scan-step">Initialising…</div>
 </div>
@@ -220,6 +226,9 @@
         <button class="pill-btn" onclick="setFilter('IAM',this)">IAM</button>
         <button class="pill-btn" onclick="setFilter('S3',this)">S3</button>
         <button class="pill-btn" onclick="setFilter('RDS',this)">RDS</button>
+        <button class="pill-btn" onclick="setFilter('VPC',this)">VPC</button>
+        <button class="pill-btn" onclick="setFilter('DynamoDB',this)">DynamoDB</button>
+        <button class="pill-btn" onclick="setFilter('CloudFront',this)">CloudFront</button>
         <input class="search-input" type="text" placeholder="Search name or ID…" oninput="setSearch(this.value)"/>
       </div>
 
@@ -227,7 +236,7 @@
         <table>
           <thead><tr>
             <th>Service</th><th>Name / ID</th><th>Type</th>
-            <th>Region</th><th>State</th><th>Status</th><th>Launched</th><th>Action</th>
+            <th>Region</th><th>State</th><th>Extra Info</th><th>Status</th><th>Launched</th><th>Action</th>
           </tr></thead>
           <tbody id="resource-tbody"></tbody>
         </table>

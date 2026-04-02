@@ -131,6 +131,12 @@ async function startConnect() {
       showPage('dashboard-page');
       showDashTab('resources');
       document.getElementById('connect-btn').disabled = false;
+      
+      // Proactively load secondary data in the background
+      loadSecurity();
+      loadCosts();
+      loadTags();
+      loadUsers();
     }, 500);
 
   } catch (err) {
@@ -254,13 +260,19 @@ function renderTable() {
       <td style="color:var(--muted2);font-size:12px">${r.type}</td>
       <td style="color:var(--muted2);font-size:12px">${r.region}</td>
       <td style="color:var(--muted2);font-size:12px">${r.state}</td>
+      <td style="color:var(--muted2);font-size:11px">
+        ${r.extra ? Object.entries(r.extra).map(([k,v]) => `<div style="white-space:nowrap" title="${v}"><strong style="color:var(--muted)">${k}:</strong> ${String(v).length > 22 ? String(v).substring(0,22)+'...' : v}</div>`).join('') : '<span style="color:var(--border2)">—</span>'}
+      </td>
       <td><span class="status-dot ${r.active ? 'active' : 'inactive'}">${r.active ? 'Active' : 'Inactive'}</span></td>
       <td style="color:var(--muted);font-size:12px">${fmtDate(r.launched)}</td>
       <td>
-        ${ r.service === 'EC2' && r.state === 'running' ? `<button class="action-btn" onclick="performAction('ec2', 'stop', '${r.id}', '${r.region}')">Stop</button><button class="action-btn" onclick="performAction('ec2', 'reboot', '${r.id}', '${r.region}')">Reboot</button>` : '' }
-        ${ r.service === 'EC2' && r.state === 'stopped' ? `<button class="action-btn" onclick="performAction('ec2', 'start', '${r.id}', '${r.region}')">Start</button>` : '' }
-        ${ r.service === 'RDS' && r.state === 'available' ? `<button class="action-btn" onclick="performAction('rds', 'stop', '${r.id}', '${r.region}')">Stop</button>` : '' }
-        ${ r.service === 'RDS' && r.state === 'stopped' ? `<button class="action-btn" onclick="performAction('rds', 'start', '${r.id}', '${r.region}')">Start</button>` : '' }
+        ${ r.service === 'EC2' && r.state === 'running' ? `<button class="action-btn" onclick="performAction('ec2', 'stop', '${r.id}', '${r.region}')">Stop</button><button class="action-btn" onclick="performAction('ec2', 'reboot', '${r.id}', '${r.region}')">Reboot</button><button class="action-btn" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="performAction('ec2', 'terminate', '${r.id}', '${r.region}')">Terminate</button>` : '' }
+        ${ r.service === 'EC2' && r.state === 'stopped' ? `<button class="action-btn" onclick="performAction('ec2', 'start', '${r.id}', '${r.region}')">Start</button><button class="action-btn" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="performAction('ec2', 'terminate', '${r.id}', '${r.region}')">Terminate</button>` : '' }
+        ${ r.service === 'RDS' && r.state === 'available' ? `<button class="action-btn" onclick="performAction('rds', 'stop', '${r.id}', '${r.region}')">Stop</button><button class="action-btn" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="performAction('rds', 'delete', '${r.id}', '${r.region}')">Delete</button>` : '' }
+        ${ r.service === 'RDS' && r.state === 'stopped' ? `<button class="action-btn" onclick="performAction('rds', 'start', '${r.id}', '${r.region}')">Start</button><button class="action-btn" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="performAction('rds', 'delete', '${r.id}', '${r.region}')">Delete</button>` : '' }
+        ${ r.service === 'CloudFront' && r.state === 'Deployed' && r.active === true ? `<button class="action-btn" onclick="performAction('cloudfront', 'stop', '${r.id}', '${r.region}')">Disable</button>` : '' }
+        ${ r.service === 'CloudFront' && r.state === 'Deployed' && r.active === false ? `<button class="action-btn" onclick="performAction('cloudfront', 'start', '${r.id}', '${r.region}')">Enable</button>` : '' }
+        ${ r.service === 'DynamoDB' && r.state === 'active' ? `<button class="action-btn" style="color:var(--red);border-color:rgba(239,68,68,0.3)" onclick="performAction('dynamodb', 'delete', '${r.id}', '${r.region}')">Delete</button>` : '' }
       </td>
     </tr>`).join('');
 }
@@ -499,6 +511,15 @@ function closeHelpModal() { document.getElementById('help-modal').classList.remo
 // ── Resource Action ───────────────────────────────────────────────────────────
 async function performAction(service, action, resourceId, region, extra = '') {
   if(!confirm(`Are you sure you want to ${action} ${resourceId}?`)) return;
+  
+  if (credCache && credCache.ak === 'DEMO-DATA') {
+    optimisticUpdate(service, action, resourceId, extra, true);
+    setTimeout(() => { optimisticUpdate(service, action, resourceId, extra, false); }, 2500);
+    return;
+  }
+  
+  optimisticUpdate(service, action, resourceId, extra, true);
+  
   const fd = getFormData();
   fd.append('service', service);
   fd.append('action', action);
@@ -508,14 +529,118 @@ async function performAction(service, action, resourceId, region, extra = '') {
   try {
     const res = await fetch('/action', {method: 'POST', body: fd});
     const d = await res.json();
-    if(d.error) alert('Error: ' + d.error);
-    else {
-      alert(`Successfully submitted ${action} for ${resourceId}`);
-      // Optimistic refresh logic could go here
+    if(d.error) {
+        alert('Error: ' + d.error);
+    } else {
+        if (service === 'ec2' || service === 'rds' || service === 'cloudfront' || service === 'dynamodb') {
+            startPolling(service, resourceId, region);
+        } else {
+            optimisticUpdate(service, action, resourceId, extra, false);
+        }
     }
   } catch(e) {
     alert('Network error: ' + e.message);
   }
+}
+
+function optimisticUpdate(service, action, resourceId, extra, isPending = false) {
+  if (service === 'ec2' || service === 'rds' || service === 'cloudfront' || service === 'dynamodb') {
+    const res = allResources.find(r => r.id === resourceId && r.service.toLowerCase() === service);
+    if (res) {
+      if (isPending) {
+        if (action === 'start') { res.state = 'starting...'; res.active = true; }
+        else if (action === 'stop') { res.state = 'stopping...'; res.active = false; }
+        else if (action === 'reboot') { res.state = 'rebooting...'; }
+        else if (action === 'terminate') { res.state = 'shutting-down...'; res.active = false; }
+        else if (action === 'delete') { res.state = 'deleting...'; res.active = false; }
+      } else {
+        if (action === 'start') { res.state = service === 'ec2' ? 'running' : (service === 'cloudfront' ? 'Deployed' : 'available'); res.active = true; }
+        else if (action === 'stop') { res.state = service === 'cloudfront' ? 'Deployed' : 'stopped'; res.active = false; }
+        else if (action === 'reboot') { res.state = service === 'ec2' ? 'running' : 'available'; }
+        else if (action === 'terminate') { res.state = 'terminated'; res.active = false; }
+        else if (action === 'delete') { res.state = 'deleted'; res.active = false; }
+      }
+      renderTable();
+      buildDashboard(computeSummary());
+    }
+  } else if (service === 'iam_key') {
+    if (userData && userData.users) {
+      const user = userData.users.find(u => u.username === extra);
+      if (user) {
+        const key = user.access_keys.find(k => k.key_id === resourceId);
+        if (key) {
+          if (isPending) {
+              key.status = 'Updating...';
+          } else {
+              key.status = action === 'enable' ? 'Active' : 'Inactive';
+          }
+          renderUsers();
+        }
+      }
+    }
+  }
+}
+
+async function startPolling(service, resourceId, region) {
+  const fd = getFormData();
+  fd.append('service', service);
+  fd.append('resource_id', resourceId);
+  fd.append('region', region);
+  
+  const targetStableStates = ['running', 'stopped', 'terminated', 'available', 'deleted', 'Deployed', 'active'];
+  let attempts = 0;
+  
+  const poll = async () => {
+    try {
+      attempts++;
+      const res = await fetch('/status', { method: 'POST', body: fd });
+      const d = await res.json();
+      
+      if (d.error && attempts > 15) return;
+
+      if (d.state && targetStableStates.includes(d.state)) {
+         const r = allResources.find(x => x.id === resourceId);
+         if (r) {
+             r.state = d.state;
+             r.active = d.active;
+             renderTable();
+             buildDashboard(computeSummary());
+         }
+         return; 
+      }
+      
+      if (attempts < 30) {
+        setTimeout(poll, 4000);
+      }
+    } catch(e) {
+      console.error(e);
+    }
+  };
+  
+  setTimeout(poll, 4000);
+}
+
+function computeSummary() {
+  const summary = {
+    total: allResources.length,
+    active: allResources.filter(r => r.active).length,
+    inactive: allResources.filter(r => !r.active).length,
+    by_service: {},
+    by_region: {}
+  };
+  for (const r of allResources) {
+    const svc = r.service;
+    const reg = r.region || 'global';
+    if (!summary.by_service[svc]) 
+      summary.by_service[svc] = { active: 0, inactive: 0 };
+    if (r.active) summary.by_service[svc].active++;
+    else summary.by_service[svc].inactive++;
+    
+    if (reg !== 'global') {
+      summary.by_region[reg] = (summary.by_region[reg] || 0) + 1;
+    }
+  }
+  return summary;
 }
 
 // ── Users Tab ─────────────────────────────────────────────────────────────────
@@ -588,4 +713,101 @@ function renderUsers() {
   }).join('');
   
   document.getElementById('user-content').innerHTML = html;
+}
+
+// ── Demo Mode ─────────────────────────────────────────────────────────────────
+function startDemo() {
+  document.getElementById('login-error').classList.remove('show');
+  credCache = { ak: 'DEMO-DATA', sk: '' };
+  
+  showPage('scan-page');
+  document.getElementById('scan-step').textContent = 'Loading mock data…';
+  animateChips();
+  
+  allResources = [
+    { service: 'EC2', name: 'web-node-01', id: 'i-0abcd1234', type: 't3.medium', state: 'running', active: true, region: 'us-east-1', launched: '2025-01-10T10:00:00Z', extra: {'Public IP': '203.0.113.45', 'Private IP': '10.0.1.12', 'VPC ID': 'vpc-abcdef12'} },
+    { service: 'EC2', name: 'worker-02', id: 'i-0fced4567', type: 't3.large', state: 'stopped', active: false, region: 'eu-west-1', launched: '2024-11-20T10:00:00Z', extra: {'Public IP': 'None', 'Private IP': '10.0.2.55', 'VPC ID': 'vpc-bcdef123'} },
+    { service: 'RDS', name: 'prod-db', id: 'db-XYZ', type: 'db.r6g.large', state: 'available', active: true, region: 'us-east-1', launched: '2023-06-15T08:00:00Z', extra: {'Endpoint': 'prod-01.us-east-1.rds.amazonaws.com', 'Port': 5432, 'VPC ID': 'vpc-abcdef12'} },
+    { service: 'CloudFront', name: 'process-uploads', id: 'arn:aws:lambda:...', type: 'Distribution', state: 'Deployed', active: true, region: 'global', launched: '2025-03-01T00:00:00Z', extra: {'Enabled': 'Yes', 'Origins': 2} },
+    { service: 'DynamoDB', name: 'users-table', id: 'users-table', type: 'Table', state: 'active', active: true, region: 'us-east-1', launched: '2022-01-10T00:00:00Z', extra: {'Item Count': 1420, 'Size (Bytes)': 20485} },
+    { service: 'IAM', name: 'alice-admin', id: 'AIDA123456789', type: 'IAM User', state: 'active', active: true, region: 'global', launched: '2024-05-12T00:00:00Z' }
+  ];
+  
+  const summary = {
+    total: 6,
+    active: 5,
+    inactive: 1,
+    by_service: {
+      'EC2': { active: 1, inactive: 1 },
+      'RDS': { active: 1, inactive: 0 },
+      'Lambda': { active: 1, inactive: 0 },
+      'S3': { active: 1, inactive: 0 },
+      'IAM': { active: 1, inactive: 0 }
+    },
+    by_region: { 'us-east-1': 3, 'eu-west-1': 1, 'global': 2 }
+  };
+
+  securityData = {
+    total: 3,
+    counts: { CRITICAL: 1, HIGH: 1, MEDIUM: 0, LOW: 1, INFO: 0 },
+    findings: [
+      { severity: 'CRITICAL', title: 'Open SSH Port', detail: 'Security group allows inbound SSH (port 22) from highly open IP ranges.', category: 'Security Group', region: 'us-east-1', resource: 'sg-0abcd1234' },
+      { severity: 'HIGH', title: 'Root Account Keys Present', detail: 'Root account has active access keys, which is strongly discouraged.', category: 'IAM', region: 'global', resource: 'Root Account' },
+      { severity: 'LOW', title: 'Unencrypted S3 Bucket', detail: 'Bucket does not enforce default SSE.', category: 'S3', region: 'global', resource: 'logs-archive-old' }
+    ]
+  };
+
+  costData = {
+    total_monthly_usd: 153.30,
+    breakdown: { 'EC2': 43.80, 'RDS': 109.50 },
+    ec2: [
+      { service: 'EC2', name: 'web-node-01', id: 'i-0abcd1', type: 't3.medium', region: 'us-east-1', state: 'running', monthly_usd: 30.66 },
+      { service: 'EC2', name: 'worker-02', id: 'i-0fced4', type: 't3.large', region: 'eu-west-1', state: 'stopped', monthly_usd: 0 }
+    ],
+    rds: [
+      { service: 'RDS', name: 'prod-db', id: 'db-XYZ', type: 'db.r6g.large', region: 'us-east-1', state: 'available', monthly_usd: 109.50 }
+    ]
+  };
+
+  tagData = {
+    total: 3, compliant: 1, non_compliant: 2, compliance_rate: 33.3,
+    records: [
+      { service: 'EC2', name: 'web-node-01', region: 'us-east-1', compliant: true, missing_tags: [], existing_tags: { 'Name': 'web-node-01', 'Environment': 'prod', 'Owner': 'alice', 'Project': 'marketing' } },
+      { service: 'EC2', name: 'worker-02', region: 'eu-west-1', compliant: false, missing_tags: ['Owner', 'Project'], existing_tags: { 'Name': 'worker-02', 'Environment': 'staging' } },
+      { service: 'Lambda', name: 'process-uploads', region: 'us-east-1', compliant: false, missing_tags: ['Environment', 'Owner', 'Project'], existing_tags: { 'Name': 'process-uploads' } }
+    ]
+  };
+
+  userData = {
+    total: 2,
+    users: [
+      { user_id: 'UID1', username: 'alice-admin', arn: 'arn:aws:iam::123:user/alice', created: '2024-05-12T00:00:00Z', last_login: '2026-04-01T10:00:00Z', console_access: true, mfa_enabled: true, is_admin: true, groups: ['Admins'], policies: ['AdministratorAccess'], inline_policies: [], access_keys: [
+        { key_id: 'AKIAALICE123', status: 'Active', age_days: 45, last_used: '2026-03-25T08:00:00Z', last_service: 's3', last_region: 'us-east-1' }
+      ]},
+      { user_id: 'UID2', username: 'bob-dev', arn: 'arn:aws:iam::123:user/bob', created: '2025-01-20T00:00:00Z', last_login: 'Never', console_access: false, mfa_enabled: false, is_admin: false, groups: ['Developers'], policies: ['AmazonEC2FullAccess'], inline_policies: [], access_keys: [
+        { key_id: 'AKIABOB456', status: 'Inactive', age_days: 120, last_used: '2025-10-10T00:00:00Z', last_service: 'ec2', last_region: 'us-east-1' }
+      ]}
+    ]
+  };
+
+  setTimeout(() => {
+    buildDashboard(summary);
+    renderTable();
+    ['EC2','Lambda','IAM','S3','RDS','VPC','DynamoDB','CloudFront'].forEach(c => { 
+      const el = document.getElementById('chip-' + c);
+      if(el) el.className = 'svc-chip done'; 
+    });
+    
+    setTimeout(() => {
+      showPage('dashboard-page');
+      showDashTab('resources');
+      document.getElementById('res-badge').textContent = summary.total;
+      
+      // Pre-render the tabs to populate their badges immediately
+      renderSecurity();
+      renderCosts();
+      renderTags();
+      renderUsers();
+    }, 500);
+  }, 1200);
 }

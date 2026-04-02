@@ -11,6 +11,9 @@ from scanner.lambda_fn import scan_lambda
 from scanner.iam import scan_iam, scan_iam_detailed
 from scanner.s3 import scan_s3
 from scanner.rds import scan_rds
+from scanner.vpc import scan_vpc
+from scanner.dynamodb import scan_dynamodb
+from scanner.cloudfront import scan_cloudfront
 from scanner.security import audit_iam, audit_s3, audit_ec2, audit_rds, audit_cloudtrail
 from scanner.cost import scan_costs
 from scanner.tagging import scan_tag_compliance
@@ -26,7 +29,7 @@ async def index(request: Request):
 
 
 @app.post("/scan")
-async def scan(
+def scan(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
@@ -34,7 +37,7 @@ async def scan(
     ak, sk = access_key.strip(), secret_key.strip()
 
     if creds_file and creds_file.filename:
-        content = await creds_file.read()
+        content = creds_file.file.read()
         config = configparser.ConfigParser()
         config.read_string(content.decode("utf-8"))
         profile = config["default"] if "default" in config else config[list(config.sections())[0]]
@@ -51,12 +54,15 @@ async def scan(
 
     results.extend(scan_iam(session))
     results.extend(scan_s3(session))
+    results.extend(scan_cloudfront(session))
 
     def scan_region(region):
         regional = []
         regional.extend(scan_ec2(session, region))
         regional.extend(scan_lambda(session, region))
         regional.extend(scan_rds(session, region))
+        regional.extend(scan_vpc(session, region))
+        regional.extend(scan_dynamodb(session, region))
         return regional
 
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -98,7 +104,7 @@ async def scan(
 
 
 @app.post("/scan/security")
-async def scan_security(
+def scan_security(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     session_token: str = Form(default=""),
@@ -108,7 +114,7 @@ async def scan_security(
     ak, sk = access_key.strip(), secret_key.strip()
 
     if creds_file and creds_file.filename:
-        content = await creds_file.read()
+        content = creds_file.file.read()
         config = configparser.ConfigParser()
         config.read_string(content.decode("utf-8"))
         profile = config["default"] if "default" in config else config[list(config.sections())[0]]
@@ -156,7 +162,7 @@ async def scan_security(
 
 
 @app.post("/scan/costs")
-async def scan_costs_endpoint(
+def scan_costs_endpoint(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
@@ -165,7 +171,7 @@ async def scan_costs_endpoint(
     ak, sk = access_key.strip(), secret_key.strip()
 
     if creds_file and creds_file.filename:
-        content = await creds_file.read()
+        content = creds_file.file.read()
         config = configparser.ConfigParser()
         config.read_string(content.decode("utf-8"))
         profile = config["default"] if "default" in config else config[list(config.sections())[0]]
@@ -185,7 +191,7 @@ async def scan_costs_endpoint(
 
 
 @app.post("/scan/tags")
-async def scan_tags_endpoint(
+def scan_tags_endpoint(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
@@ -194,7 +200,7 @@ async def scan_tags_endpoint(
     ak, sk = access_key.strip(), secret_key.strip()
 
     if creds_file and creds_file.filename:
-        content = await creds_file.read()
+        content = creds_file.file.read()
         config = configparser.ConfigParser()
         config.read_string(content.decode("utf-8"))
         profile = config["default"] if "default" in config else config[list(config.sections())[0]]
@@ -222,7 +228,7 @@ async def scan_tags_endpoint(
 
 
 @app.post("/scan/users")
-async def scan_users_endpoint(
+def scan_users_endpoint(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     creds_file: UploadFile = File(default=None),
@@ -230,7 +236,7 @@ async def scan_users_endpoint(
     """Return detailed IAM user data."""
     ak, sk = access_key.strip(), secret_key.strip()
     if creds_file and creds_file.filename:
-        content = await creds_file.read()
+        content = creds_file.file.read()
         config = configparser.ConfigParser()
         config.read_string(content.decode("utf-8"))
         profile = config["default"] if "default" in config else config[list(config.sections())[0]]
@@ -248,7 +254,7 @@ async def scan_users_endpoint(
 
 
 @app.post("/action")
-async def perform_action(
+def perform_action(
     access_key: str = Form(default=""),
     secret_key: str = Form(default=""),
     service: str = Form(...),
@@ -279,6 +285,8 @@ async def perform_action(
                 client.stop_instances(InstanceIds=[resource_id])
             elif action == "reboot":
                 client.reboot_instances(InstanceIds=[resource_id])
+            elif action == "terminate":
+                client.terminate_instances(InstanceIds=[resource_id])
             else:
                 return JSONResponse({"error": f"Unknown EC2 action: {action}"}, status_code=400)
 
@@ -288,8 +296,30 @@ async def perform_action(
                 client.start_db_instance(DBInstanceIdentifier=resource_id)
             elif action == "stop":
                 client.stop_db_instance(DBInstanceIdentifier=resource_id)
+            elif action == "delete":
+                client.delete_db_instance(DBInstanceIdentifier=resource_id, SkipFinalSnapshot=True)
             else:
                 return JSONResponse({"error": f"Unknown RDS action: {action}"}, status_code=400)
+
+        elif service == "cloudfront":
+            client = session.client("cloudfront")
+            dist = client.get_distribution_config(Id=resource_id)
+            config = dist['DistributionConfig']
+            etag = dist['ETag']
+            if action == "start":
+                config['Enabled'] = True
+            elif action == "stop":
+                config['Enabled'] = False
+            else:
+                return JSONResponse({"error": f"Unknown CloudFront action: {action}"}, status_code=400)
+            client.update_distribution(Id=resource_id, IfMatch=etag, DistributionConfig=config)
+
+        elif service == "dynamodb":
+            client = session.client("dynamodb", region_name=region)
+            if action == "delete":
+                client.delete_table(TableName=resource_id)
+            else:
+                return JSONResponse({"error": f"Unknown DynamoDB action: {action}"}, status_code=400)
 
         elif service == "iam_key":
             client = session.client("iam")
@@ -312,3 +342,57 @@ async def perform_action(
 
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/status")
+def get_resource_status(
+    access_key: str = Form(default=""),
+    secret_key: str = Form(default=""),
+    service: str = Form(...),
+    resource_id: str = Form(...),
+    region: str = Form(default="us-east-1"),
+    creds_file: UploadFile = File(default=None),
+):
+    ak, sk = access_key.strip(), secret_key.strip()
+    if creds_file and creds_file.filename:
+        content = creds_file.file.read()
+        config = configparser.ConfigParser()
+        config.read_string(content.decode("utf-8"))
+        profile = config["default"] if "default" in config else config[list(config.sections())[0]]
+        ak = profile.get("aws_access_key_id", "").strip()
+        sk = profile.get("aws_secret_access_key", "").strip()
+        
+    try:
+        session = get_session(ak or None, sk or None)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+    try:
+        if service == "ec2":
+            client = session.client("ec2", region_name=region)
+            res = client.describe_instances(InstanceIds=[resource_id])
+            state = res["Reservations"][0]["Instances"][0]["State"]["Name"]
+            return JSONResponse({"state": state, "active": state == "running"})
+        elif service == "rds":
+            client = session.client("rds", region_name=region)
+            res = client.describe_db_instances(DBInstanceIdentifier=resource_id)
+            state = res["DBInstances"][0]["DBInstanceStatus"]
+            return JSONResponse({"state": state, "active": state == "available"})
+        elif service == "cloudfront":
+            client = session.client("cloudfront")
+            res = client.get_distribution(Id=resource_id)
+            state = res["Distribution"]["Status"]
+            enabled = res["Distribution"]["DistributionConfig"]["Enabled"]
+            active = (state == "Deployed") and enabled
+            return JSONResponse({"state": state, "active": active})
+        elif service == "dynamodb":
+            client = session.client("dynamodb", region_name=region)
+            res = client.describe_table(TableName=resource_id)
+            state = res["Table"]["TableStatus"].lower()
+            return JSONResponse({"state": state, "active": state == "active"})
+        else:
+            return JSONResponse({"error": f"Polling unsupported for {service}"}, status_code=400)
+    except Exception as e:
+        error_msg = str(e)
+        if "NotFound" in error_msg:
+            return JSONResponse({"state": "terminated" if service=="ec2" else "deleted", "active": False})
+        return JSONResponse({"error": error_msg}, status_code=500)

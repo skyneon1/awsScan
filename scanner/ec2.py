@@ -18,7 +18,12 @@ def scan_ec2(session, region: str) -> list[dict]:
                     "active": inst["State"]["Name"] == "running",
                     "region": region,
                     "launched": str(inst.get("LaunchTime", "N/A")),
-                    "service": "EC2"
+                    "service": "EC2",
+                    "extra": {
+                        "Public IP": inst.get("PublicIpAddress", "None"),
+                        "Private IP": inst.get("PrivateIpAddress", "None"),
+                        "VPC ID": inst.get("VpcId", "None")
+                    }
                 })
         return instances
     except Exception as e:
