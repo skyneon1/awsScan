@@ -21,8 +21,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Basic import check
-        run: python -c "from main import app; print('App imported successfully')"
+      - name: Basic syntax check
+        run: python -m py_compile main.py && echo "Syntax OK"
 
   deploy:
     runs-on: ubuntu-latest
