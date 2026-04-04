@@ -2,7 +2,7 @@ name: awsScan CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
   pull_request:
     branches: [ main ]
 
@@ -21,10 +21,30 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Basic syntax check
-        run: python -m py_compile main.py && echo "Syntax OK"
+      - name: Syntax check
+        run: python -m py_compile main.py && echo "✅ Syntax OK"
 
-  deploy:
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/dev'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Staging
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_STAGING_TOKEN }}
+        run: railway up --service ${{ secrets.RAILWAY_STAGING_SERVICE }}
+
+      - name: Success
+        run: echo "✅ Staging live at https://staging.awsscan.in"
+
+  deploy-production:
     runs-on: ubuntu-latest
     needs: test
     if: github.ref == 'refs/heads/main'
@@ -36,9 +56,10 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy to Railway
+      - name: Deploy to Production
         env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-        run: railway up --service ${{ secrets.RAILWAY_SERVICE_NAME }}
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_PROD_TOKEN }}
+        run: railway up --service ${{ secrets.RAILWAY_PROD_SERVICE }}
 
-        
+      - name: Success
+        run: echo "🚀 Production live at https://www.awsscan.in"
