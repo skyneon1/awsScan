@@ -42,7 +42,7 @@ jobs:
         run: railway up --service ${{ secrets.RAILWAY_STAGING_SERVICE }}
 
       - name: Success
-        run: echo "✅ Staging live at https://staging.awsscan.in"
+        run: echo "✅ Staging live at https://awsscan-staging-production.up.railway.app/"
 
   deploy-production:
     runs-on: ubuntu-latest
